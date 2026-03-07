@@ -7,6 +7,9 @@ import { fileURLToPath } from "url";
 import admin from "firebase-admin";
 import { OAuth2Client } from "google-auth-library";
 import Database from "better-sqlite3";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -281,6 +284,13 @@ async function startServer() {
   console.log(`APP_URL: ${process.env.APP_URL || "not set"}`);
 
   app.set("trust proxy", 1);
+  
+  // Debug middleware to log all requests
+  app.use((req, res, next) => {
+    console.log(`Server Request: ${req.method} ${req.url} (Host: ${req.get('host')})`);
+    next();
+  });
+
   app.use(express.json());
   app.use(cookieParser());
   app.use(
@@ -346,7 +356,11 @@ async function startServer() {
   });
 
   app.get("/api/ping", (req, res) => {
-    res.json({ status: "ok", time: new Date().toISOString() });
+    res.json({ status: "ok", time: new Date().toISOString(), env: process.env.NODE_ENV });
+  });
+
+  app.get("/api/hello", (req, res) => {
+    res.json({ message: "API is alive and returning JSON" });
   });
 
   app.get("/api/auth/google/url", (req, res) => {
@@ -364,6 +378,80 @@ async function startServer() {
     res.json({ url });
   });
 
+  app.get("/api/user", (req, res) => {
+    if (!AUTH_ENABLED) {
+      if (process.env.NODE_ENV === "production") {
+        return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
+      }
+      return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
+    }
+    
+    if (req.session.user) {
+      res.json(req.session.user);
+    } else {
+      res.status(401).json({ error: "Unauthorized" });
+    }
+  });
+
+  app.get("/api/cvs", async (req, res) => {
+    try {
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const cvs = await db.getCVs(userId);
+      res.json(cvs);
+    } catch (err: any) {
+      console.error("Error fetching CVs:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/cvs", async (req, res) => {
+    try {
+      const { id, title, content, template, parent_id } = req.body;
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      
+      const cvData = {
+        user_id: userId,
+        parent_id: parent_id || null,
+        title,
+        content,
+        template
+      };
+
+      await db.saveCV(id, cvData);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error saving CV:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/cvs/:id", async (req, res) => {
+    try {
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const success = await db.deleteCV(req.params.id, userId);
+      if (!success) {
+        return res.status(403).json({ error: "Forbidden or not found" });
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting CV:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
+  // Auth Callback (Not under /api prefix as it returns HTML)
   app.get("/auth/google/callback", async (req, res) => {
     try {
       const { code } = req.query;
@@ -463,78 +551,10 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy(() => {
-      res.json({ success: true });
-    });
-  });
-
-  app.get("/api/user", (req, res) => {
-    if (!AUTH_ENABLED) {
-      if (process.env.NODE_ENV === "production") {
-        return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
-      }
-      return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
-    }
-    
-    if (req.session.user) {
-      res.json(req.session.user);
-    } else {
-      res.status(401).json({ error: "Unauthorized" });
-    }
-  });
-
-  // CV Routes
-  app.get("/api/cvs", async (req, res) => {
-    try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-      const cvs = await db.getCVs(userId);
-      res.json(cvs);
-    } catch (err: any) {
-      console.error("Error fetching CVs:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/cvs", async (req, res) => {
-    try {
-      const { id, title, content, template, parent_id } = req.body;
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
-      
-      const cvData = {
-        user_id: userId,
-        parent_id: parent_id || null,
-        title,
-        content,
-        template
-      };
-
-      await db.saveCV(id, cvData);
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("Error saving CV:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/cvs/:id", async (req, res) => {
-    try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-      const success = await db.deleteCV(req.params.id, userId);
-      if (!success) {
-        return res.status(403).json({ error: "Forbidden or not found" });
-      }
-
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("Error deleting CV:", err);
-      res.status(500).json({ error: err.message });
-    }
+  // Catch-all for any other /api requests to prevent falling through to SPA fallback
+  app.all("/api/*", (req, res) => {
+    console.warn(`API 404: ${req.method} ${req.url}`);
+    res.status(404).json({ error: "API route not found", url: req.url });
   });
 
   // Vite middleware for development
@@ -549,11 +569,6 @@ async function startServer() {
     console.log(`Serving static files from: ${distPath}`);
     app.use(express.static(distPath));
     
-    // API 404 handler to prevent falling through to index.html
-    app.all("/api/*", (req, res) => {
-      res.status(404).json({ error: "API route not found", url: req.url, method: req.method });
-    });
-
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });

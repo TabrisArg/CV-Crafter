@@ -604,6 +604,21 @@ export default function App() {
     }
   }, [authEnabled, user]);
 
+  const [apiStatus, setApiStatus] = useState<{status: string, message: string} | null>(null);
+
+  useEffect(() => {
+    const checkApi = async () => {
+      try {
+        const res = await fetch("/api/hello");
+        const data = await res.json();
+        setApiStatus({ status: "ok", message: data.message });
+      } catch (err: any) {
+        setApiStatus({ status: "error", message: err.message });
+      }
+    };
+    checkApi();
+  }, []);
+
   const fetchUser = async () => {
     try {
       console.log("App: Fetching user status...");
@@ -2303,6 +2318,12 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      {/* Debug API Status */}
+      {apiStatus?.status === "error" && (
+        <div className="fixed bottom-4 right-4 bg-red-500 text-white p-2 rounded shadow-lg text-xs z-50">
+          API Error: {apiStatus.message}
+        </div>
+      )}
     </div>
   );
 }
