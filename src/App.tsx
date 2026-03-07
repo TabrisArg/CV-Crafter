@@ -613,7 +613,8 @@ export default function App() {
         console.log("App: User fetched successfully:", data.name);
         setUser(data);
       } else {
-        console.log("App: User not logged in (401)");
+        const text = await res.text();
+        console.log(`App: User fetch failed with status ${res.status}. Body: ${text.substring(0, 100)}`);
         setUser(null);
       }
     } catch (err) {
@@ -755,6 +756,11 @@ export default function App() {
         // Use local CVs as the source of truth for now
         setCvs(localCvs);
         return;
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server returned ${res.status}: ${text.substring(0, 100)}`);
       }
 
       const data = await res.json();

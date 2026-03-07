@@ -60,12 +60,18 @@ function initFirestore() {
       } catch (parseErr: any) {
         // If it fails with "control character", it's likely literal newlines in the private_key
         // We try to escape literal newlines and other control characters
-        if (parseErr.message.toLowerCase().includes("control character") || parseErr.message.toLowerCase().includes("newline")) {
-          // Replace literal newlines with escaped newlines for JSON.parse
-          const sanitizedSa = sa.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+        console.log("JSON parse failed, attempting to sanitize string...");
+        // Replace literal newlines and other common control characters
+        const sanitizedSa = sa
+          .replace(/\n/g, "\\n")
+          .replace(/\r/g, "\\r")
+          .replace(/\t/g, "\\t");
+        try {
           serviceAccount = JSON.parse(sanitizedSa);
-        } else {
-          throw parseErr;
+          console.log("Sanitization successful");
+        } catch (secondErr: any) {
+          console.error("Sanitization failed:", secondErr.message);
+          throw parseErr; // Throw original error for better debugging
         }
       }
       
@@ -325,7 +331,10 @@ async function startServer() {
       authEnabled: AUTH_ENABLED,
       persistenceType: useFirestore ? "cloud" : "local",
       isProduction,
+      nodeEnv: process.env.NODE_ENV,
       firestoreError: firestoreInitError,
+      appUrl: process.env.APP_URL,
+      trustProxy: app.get("trust proxy"),
       missingVars: [
         !(process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID) && "GOOGLE_CLIENT_ID",
         !(process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET) && "GOOGLE_CLIENT_SECRET",
@@ -334,6 +343,10 @@ async function startServer() {
         !process.env.APP_URL && "APP_URL"
       ].filter(Boolean)
     });
+  });
+
+  app.get("/api/ping", (req, res) => {
+    res.json({ status: "ok", time: new Date().toISOString() });
   });
 
   app.get("/api/auth/google/url", (req, res) => {
@@ -532,11 +545,29 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    const distPath = path.join(__dirname, "dist");
+    console.log(`Serving static files from: ${distPath}`);
+    app.use(express.static(distPath));
+    
+    // API 404 handler to prevent falling through to index.html
+    app.all("/api/*", (req, res) => {
+      res.status(404).json({ error: "API route not found", url: req.url, method: req.method });
+    });
+
     app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Global Error Handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error("Global Error Handler caught:", err);
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: err.message,
+      stack: process.env.NODE_ENV === "production" ? undefined : err.stack 
+    });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
