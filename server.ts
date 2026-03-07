@@ -45,9 +45,14 @@ let useFirestore = false;
 function initFirestore() {
   if (firestore) return firestore;
   
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  let sa = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (sa) {
     try {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+      // Handle cases where the string might be wrapped in quotes or have escaped characters
+      if (sa.startsWith("'") && sa.endsWith("'")) sa = sa.slice(1, -1);
+      if (sa.startsWith('"') && sa.endsWith('"')) sa = sa.slice(1, -1);
+      
+      const serviceAccount = JSON.parse(sa);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
@@ -256,8 +261,8 @@ async function startServer() {
     })
   );
 
-  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
   const AUTH_ENABLED = !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 
   console.log(`Auth enabled: ${AUTH_ENABLED} (Client ID: ${GOOGLE_CLIENT_ID ? "present" : "missing"})`);
@@ -291,8 +296,8 @@ async function startServer() {
       persistenceType: useFirestore ? "cloud" : "local",
       isProduction,
       missingVars: [
-        !GOOGLE_CLIENT_ID && "GOOGLE_CLIENT_ID",
-        !GOOGLE_CLIENT_SECRET && "GOOGLE_CLIENT_SECRET",
+        !(process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID) && "GOOGLE_CLIENT_ID",
+        !(process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET) && "GOOGLE_CLIENT_SECRET",
         !process.env.FIREBASE_SERVICE_ACCOUNT && "FIREBASE_SERVICE_ACCOUNT",
         !process.env.SESSION_SECRET && "SESSION_SECRET",
         !process.env.APP_URL && "APP_URL"
