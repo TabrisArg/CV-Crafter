@@ -285,9 +285,18 @@ async function startServer() {
 
   // API Routes
   app.get("/api/config", (req, res) => {
+    const isProduction = process.env.NODE_ENV === "production";
     res.json({ 
       authEnabled: AUTH_ENABLED,
-      persistenceType: useFirestore ? "cloud" : "local"
+      persistenceType: useFirestore ? "cloud" : "local",
+      isProduction,
+      missingVars: [
+        !GOOGLE_CLIENT_ID && "GOOGLE_CLIENT_ID",
+        !GOOGLE_CLIENT_SECRET && "GOOGLE_CLIENT_SECRET",
+        !process.env.FIREBASE_SERVICE_ACCOUNT && "FIREBASE_SERVICE_ACCOUNT",
+        !process.env.SESSION_SECRET && "SESSION_SECRET",
+        !process.env.APP_URL && "APP_URL"
+      ].filter(Boolean)
     });
   });
 
@@ -413,6 +422,9 @@ async function startServer() {
 
   app.get("/api/user", (req, res) => {
     if (!AUTH_ENABLED) {
+      if (process.env.NODE_ENV === "production") {
+        return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
+      }
       return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
     }
     
@@ -426,7 +438,7 @@ async function startServer() {
   // CV Routes
   app.get("/api/cvs", async (req, res) => {
     try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : "debug-user";
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       const cvs = await db.getCVs(userId);
@@ -440,7 +452,7 @@ async function startServer() {
   app.post("/api/cvs", async (req, res) => {
     try {
       const { id, title, content, template, parent_id } = req.body;
-      const userId = AUTH_ENABLED ? req.session.user?.id : "debug-user";
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
       
       const cvData = {
@@ -461,7 +473,7 @@ async function startServer() {
 
   app.delete("/api/cvs/:id", async (req, res) => {
     try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : "debug-user";
+      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       const success = await db.deleteCV(req.params.id, userId);

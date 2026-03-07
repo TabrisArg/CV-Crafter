@@ -464,6 +464,8 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authEnabled, setAuthEnabled] = useState(false);
   const [persistenceType, setPersistenceType] = useState<"cloud" | "local">("local");
+  const [isProduction, setIsProduction] = useState(false);
+  const [missingVars, setMissingVars] = useState<string[]>([]);
   const [view, setView] = useState<"dashboard" | "editor" | "cv-list">("dashboard");
   const [cvs, setCvs] = useState<CV[]>([]);
   const [currentCv, setCurrentCv] = useState<CV | null>(null);
@@ -625,9 +627,13 @@ export default function App() {
       const data = await res.json();
       setAuthEnabled(data.authEnabled);
       setPersistenceType(data.persistenceType);
+      setIsProduction(data.isProduction);
+      setMissingVars(data.missingVars || []);
     } catch (err) {
       setAuthEnabled(false);
       setPersistenceType("local");
+      setIsProduction(false);
+      setMissingVars([]);
     }
   };
 
@@ -1323,6 +1329,36 @@ export default function App() {
   }
 
   if (view === "dashboard") {
+    if (isProduction && !authEnabled) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-2xl border border-slate-200 text-center">
+            <div className="w-16 h-16 bg-rose-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="w-8 h-8 text-rose-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 mb-2">Configuration Required</h1>
+            <p className="text-slate-500 mb-8">
+              Authentication is not configured for this deployment. For security reasons, debug mode is disabled in production.
+            </p>
+            <div className="bg-slate-50 rounded-2xl p-4 text-left mb-8">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Missing Variables:</p>
+              <ul className="space-y-2">
+                {missingVars.map(v => (
+                  <li key={v} className="flex items-center gap-2 text-sm text-slate-600 font-mono">
+                    <div className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                    {v}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <p className="text-xs text-slate-400">
+              Please set these environment variables in your deployment platform (Netlify) to enable the application.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10">
@@ -1372,7 +1408,11 @@ export default function App() {
                 <p className="text-sm text-amber-700 leading-relaxed">
                   Your CVs are currently being saved to a temporary local database. 
                   <span className="font-bold"> They will be lost if the application restarts.</span> 
-                  To enable permanent cloud storage, configure the <code className="bg-amber-100 px-1 rounded">FIREBASE_SERVICE_ACCOUNT</code> environment variable.
+                  {isProduction ? (
+                    <> To enable permanent cloud storage, please configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> variable in your Netlify dashboard.</>
+                  ) : (
+                    <> To enable permanent cloud storage, configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> environment variable.</>
+                  )}
                 </p>
               </div>
             </motion.div>
