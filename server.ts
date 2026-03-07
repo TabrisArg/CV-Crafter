@@ -42,25 +42,55 @@ sqlite.exec(`
 let firestore: FirebaseFirestore.Firestore | null = null;
 let useFirestore = false;
 
+let firestoreInitError: string | null = null;
+
 function initFirestore() {
   if (firestore) return firestore;
   
   let sa = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (sa) {
     try {
-      // Handle cases where the string might be wrapped in quotes or have escaped characters
+      // Handle cases where the string might be wrapped in quotes
       if (sa.startsWith("'") && sa.endsWith("'")) sa = sa.slice(1, -1);
       if (sa.startsWith('"') && sa.endsWith('"')) sa = sa.slice(1, -1);
       
-      const serviceAccount = JSON.parse(sa);
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(sa);
+      } catch (parseErr: any) {
+        // If it fails with "control character", it's likely literal newlines in the private_key
+        // We try to escape literal newlines and other control characters
+        if (parseErr.message.toLowerCase().includes("control character") || parseErr.message.toLowerCase().includes("newline")) {
+          // Replace literal newlines with escaped newlines for JSON.parse
+          const sanitizedSa = sa.replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+          serviceAccount = JSON.parse(sanitizedSa);
+        } else {
+          throw parseErr;
+        }
+      }
+      
+      // Ensure private_key has proper newlines for Firebase (it needs actual newlines, not \n string)
+      if (serviceAccount.private_key && typeof serviceAccount.private_key === 'string') {
+        serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      }
+
+      // Validate required fields
+      const requiredFields = ['project_id', 'private_key', 'client_email'];
+      const missingFields = requiredFields.filter(field => !serviceAccount[field]);
+      
+      if (missingFields.length > 0) {
+        throw new Error(`Service account JSON is missing required fields: ${missingFields.join(', ')}`);
+      }
+
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
       });
       firestore = admin.firestore();
       useFirestore = true;
       console.log("Firestore initialized successfully");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to initialize Firestore with service account:", err);
+      firestoreInitError = err.message || String(err);
       useFirestore = false;
     }
   } else {
@@ -295,6 +325,7 @@ async function startServer() {
       authEnabled: AUTH_ENABLED,
       persistenceType: useFirestore ? "cloud" : "local",
       isProduction,
+      firestoreError: firestoreInitError,
       missingVars: [
         !(process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID) && "GOOGLE_CLIENT_ID",
         !(process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET) && "GOOGLE_CLIENT_SECRET",

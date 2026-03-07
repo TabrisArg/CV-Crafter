@@ -466,6 +466,7 @@ export default function App() {
   const [persistenceType, setPersistenceType] = useState<"cloud" | "local">("local");
   const [isProduction, setIsProduction] = useState(false);
   const [missingVars, setMissingVars] = useState<string[]>([]);
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
   const [view, setView] = useState<"dashboard" | "editor" | "cv-list">("dashboard");
   const [cvs, setCvs] = useState<CV[]>([]);
   const [currentCv, setCurrentCv] = useState<CV | null>(null);
@@ -629,11 +630,13 @@ export default function App() {
       setPersistenceType(data.persistenceType);
       setIsProduction(data.isProduction);
       setMissingVars(data.missingVars || []);
+      setFirestoreError(data.firestoreError || null);
     } catch (err) {
       setAuthEnabled(false);
       setPersistenceType("local");
       setIsProduction(false);
       setMissingVars([]);
+      setFirestoreError(null);
     }
   };
 
@@ -1407,15 +1410,20 @@ export default function App() {
               </div>
               <div className="flex-1">
                 <h3 className="font-bold text-amber-900 mb-1">Local Storage Mode</h3>
-                <p className="text-sm text-amber-700 leading-relaxed">
+                <div className="text-sm text-amber-700 leading-relaxed">
                   Your CVs are currently being saved to a temporary local database. 
                   <span className="font-bold"> They will be lost if the application restarts.</span> 
-                  {isProduction ? (
+                  {firestoreError ? (
+                    <div className="mt-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200/50">
+                      <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Initialization Error:</p>
+                      <p className="text-xs font-mono text-amber-900 break-all">{firestoreError}</p>
+                    </div>
+                  ) : isProduction ? (
                     <> To enable permanent cloud storage, please configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> variable in your environment settings.</>
                   ) : (
                     <> To enable permanent cloud storage, configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> environment variable.</>
                   )}
-                </p>
+                </div>
               </div>
             </motion.div>
           )}
