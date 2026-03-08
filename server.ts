@@ -59,22 +59,30 @@ function initFirestore() {
       
       let serviceAccount;
       try {
+        // First attempt: direct parse
         serviceAccount = JSON.parse(sa);
       } catch (parseErr: any) {
-        // If it fails with "control character", it's likely literal newlines in the private_key
-        // We try to escape literal newlines and other control characters
-        console.log("JSON parse failed, attempting to sanitize string...");
-        // Replace literal newlines and other common control characters
-        const sanitizedSa = sa
-          .replace(/\n/g, "\\n")
-          .replace(/\r/g, "\\r")
-          .replace(/\t/g, "\\t");
+        console.log("Initial JSON parse failed, attempting to sanitize string...");
+        // Handle common issues: literal newlines, escaped quotes, etc.
+        let sanitized = sa
+          .replace(/\\n/g, "\\\\n") // Escape existing backslashes for newlines
+          .replace(/\r/g, "")       // Remove carriage returns
+          .replace(/\n/g, "");      // Remove actual newlines if they exist in the string
+          
         try {
-          serviceAccount = JSON.parse(sanitizedSa);
+          serviceAccount = JSON.parse(sanitized);
           console.log("Sanitization successful");
         } catch (secondErr: any) {
-          console.error("Sanitization failed:", secondErr.message);
-          throw parseErr; // Throw original error for better debugging
+          // If it still fails, it might be that the string is double-escaped or has other issues
+          // Let's try one more aggressive approach: replace all literal newlines with escaped ones
+          try {
+             const verySanitized = sa.replace(/\n/g, "\\n");
+             serviceAccount = JSON.parse(verySanitized);
+             console.log("Aggressive sanitization successful");
+          } catch (thirdErr) {
+             console.error("All JSON parsing attempts failed");
+             throw parseErr;
+          }
         }
       }
       
@@ -99,7 +107,7 @@ function initFirestore() {
       console.log("Firestore initialized successfully");
     } catch (err: any) {
       console.error("Failed to initialize Firestore with service account:", err);
-      firestoreInitError = err.message || String(err);
+      firestoreInitError = `Firestore Init Error: ${err.message || String(err)}`;
       useFirestore = false;
     }
   } else {
@@ -277,22 +285,42 @@ const db = {
 };
 
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
+  try {
+    const app = express();
+    const PORT = 3000;
 
-  console.log(`Starting server in ${process.env.NODE_ENV} mode`);
-  console.log(`APP_URL: ${process.env.APP_URL || "not set"}`);
+    console.log(`Starting server in ${process.env.NODE_ENV} mode`);
+    console.log(`APP_URL: ${process.env.APP_URL || "not set"}`);
 
-  app.set("trust proxy", 1);
-  
-  // Debug middleware to log all requests
-  app.use((req, res, next) => {
-    console.log(`Server Request: ${req.method} ${req.url} (Host: ${req.get('host')})`);
-    next();
-  });
+    const serverLogs: string[] = [];
+    const log = (msg: string) => {
+      const timestamp = new Date().toISOString();
+      const entry = `[${timestamp}] ${msg}`;
+      console.log(entry);
+      serverLogs.push(entry);
+      if (serverLogs.length > 50) serverLogs.shift();
+    };
 
-  app.use(express.json());
-  app.use(cookieParser());
+    app.set("trust proxy", 1);
+    
+    // Test route at the very top
+    app.get("/api/test-json", (req, res) => {
+      log("Test JSON endpoint hit");
+      res.json({ message: "JSON is working", timestamp: new Date().toISOString(), logs: serverLogs });
+    });
+
+    app.get("/api/server-logs", (req, res) => {
+      res.json({ logs: serverLogs });
+    });
+
+    // Debug middleware to log all requests
+    app.use((req, res, next) => {
+      log(`Request: ${req.method} ${req.url} (Host: ${req.get('host')})`);
+      next();
+    });
+
+    app.use(express.json());
+    app.use(cookieParser());
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "cv-craft-secret-key",
@@ -584,9 +612,17 @@ async function startServer() {
     });
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (startupErr: any) {
+    console.error("FATAL STARTUP ERROR:", startupErr);
+    const errorApp = express();
+    errorApp.get("*", (req, res) => {
+      res.status(500).json({ error: "Server failed to start", message: startupErr.message });
+    });
+    errorApp.listen(3000, "0.0.0.0");
+  }
 }
 
 startServer();

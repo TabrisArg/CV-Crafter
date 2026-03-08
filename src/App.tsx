@@ -609,11 +609,23 @@ export default function App() {
   useEffect(() => {
     const checkApi = async () => {
       try {
-        const res = await fetch("/api/hello");
-        const data = await res.json();
-        setApiStatus({ status: "ok", message: data.message });
+        console.log("App: Testing API connectivity...");
+        const res = await fetch("/api/test-json");
+        const contentType = res.headers.get("content-type");
+        console.log(`App: API test response status: ${res.status}, content-type: ${contentType}`);
+        
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          console.log("App: API test successful:", data.message);
+          setApiStatus({ status: "ok", message: `API Connected: ${data.timestamp}` });
+        } else {
+          const text = await res.text();
+          console.error("App: API test failed - NOT JSON. Received:", text.substring(0, 100));
+          setApiStatus({ status: "error", message: "API returned HTML instead of JSON. Check server configuration." });
+        }
       } catch (err: any) {
-        setApiStatus({ status: "error", message: err.message });
+        console.error("App: API test error:", err);
+        setApiStatus({ status: "error", message: `API Connection Error: ${err.message}` });
       }
     };
     checkApi();
