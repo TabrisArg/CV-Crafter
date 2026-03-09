@@ -639,6 +639,12 @@ export default function App() {
         if (!contentType || !contentType.includes("application/json")) {
           const text = await res.text();
           console.error(`App: Config fetch returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
+          // Default to local mode if backend is missing (e.g. on static host like Netlify)
+          setAuthEnabled(false);
+          setPersistenceType("local");
+          setIsProduction(false);
+          setMissingVars([]);
+          setFirestoreError(null);
           return;
         }
         const data = await res.json();
