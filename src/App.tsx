@@ -665,6 +665,18 @@ export default function App() {
     try {
       console.log("Fetching Google Auth URL...");
       const res = await fetch("/api/auth/google/url");
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Failed to get auth URL: ${res.status}. Body: ${text.substring(0, 100)}`);
+      }
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON for auth URL: ${contentType}. Body: ${text.substring(0, 100)}`);
+      }
+
       const { url } = await res.json();
       console.log("Opening auth popup:", url);
       const authWindow = window.open(url, "oauth_popup", "width=600,height=700");
@@ -781,6 +793,12 @@ export default function App() {
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Server returned ${res.status}: ${text.substring(0, 100)}`);
+      }
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(`Server returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
       }
 
       const data = await res.json();

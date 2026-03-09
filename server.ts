@@ -294,6 +294,12 @@ async function startServer() {
 
     app.set("trust proxy", 1);
     
+    // Global Logging Middleware
+    app.use((req, res, next) => {
+      console.log(`[SERVER] ${req.method} ${req.url} (Original: ${req.originalUrl})`);
+      next();
+    });
+
     // Trailing slash normalization for API
     app.use((req, res, next) => {
       if (req.url.startsWith('/api/') && req.url.endsWith('/') && req.url.length > 5) {
@@ -304,163 +310,161 @@ async function startServer() {
 
     app.use(express.json());
     app.use(cookieParser());
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "cv-craft-secret-key",
-      resave: true,
-      saveUninitialized: true,
-      cookie: {
-        secure: process.env.NODE_ENV === "production" || !!process.env.APP_URL,
-        sameSite: "none",
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-      },
-    })
-  );
+    app.use(
+      session({
+        secret: process.env.SESSION_SECRET || "cv-craft-secret-key",
+        resave: true,
+        saveUninitialized: true,
+        cookie: {
+          secure: process.env.NODE_ENV === "production" || !!process.env.APP_URL,
+          sameSite: "none",
+          httpOnly: true,
+          maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        },
+      })
+    );
 
-  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
-  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
-  const AUTH_ENABLED = !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID;
+    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET;
+    const AUTH_ENABLED = !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 
-  console.log(`Auth enabled: ${AUTH_ENABLED} (Client ID: ${GOOGLE_CLIENT_ID ? "present" : "missing"})`);
+    console.log(`Auth enabled: ${AUTH_ENABLED} (Client ID: ${GOOGLE_CLIENT_ID ? "present" : "missing"})`);
 
-  const oauthClient = new OAuth2Client(
-    GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET
-  );
+    const oauthClient = new OAuth2Client(
+      GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET
+    );
 
-  // Initialize DB (try Firestore, fallback to SQLite)
-  initFirestore();
+    // Initialize DB (try Firestore, fallback to SQLite)
+    initFirestore();
 
-  // Log DB Status
-  try {
-    const cvCount = sqlite.prepare("SELECT COUNT(*) as count FROM cvs").get() as { count: number };
-    console.log(`Database initialized. Current CV count in SQLite: ${cvCount.count}`);
-    if (useFirestore) {
-      console.log("Firestore is also active as primary storage.");
-    } else {
-      console.warn("WARNING: Using SQLite fallback. Data will be lost if the container restarts.");
-    }
-  } catch (err) {
-    console.error("Error checking DB status:", err);
-  }
+    // API Router
+    const apiRouter = express.Router();
 
-  // API Routes
-  app.get("/api/config", (req, res) => {
-    const isProduction = process.env.NODE_ENV === "production";
-    res.json({ 
-      authEnabled: AUTH_ENABLED,
-      persistenceType: useFirestore ? "cloud" : "local",
-      isProduction,
-      nodeEnv: process.env.NODE_ENV,
-      firestoreError: firestoreInitError,
-      appUrl: process.env.APP_URL,
-      trustProxy: app.get("trust proxy"),
-      missingVars: [
-        !(process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID) && "GOOGLE_CLIENT_ID",
-        !(process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET) && "GOOGLE_CLIENT_SECRET",
-        !process.env.FIREBASE_SERVICE_ACCOUNT && "FIREBASE_SERVICE_ACCOUNT",
-        !process.env.SESSION_SECRET && "SESSION_SECRET",
-        !process.env.APP_URL && "APP_URL"
-      ].filter(Boolean)
+    apiRouter.get("/config", (req, res) => {
+      const isProduction = process.env.NODE_ENV === "production";
+      res.json({ 
+        authEnabled: AUTH_ENABLED,
+        persistenceType: useFirestore ? "cloud" : "local",
+        isProduction,
+        nodeEnv: process.env.NODE_ENV,
+        firestoreError: firestoreInitError,
+        appUrl: process.env.APP_URL,
+        trustProxy: app.get("trust proxy"),
+        missingVars: [
+          !(process.env.GOOGLE_CLIENT_ID || process.env.CLIENT_ID) && "GOOGLE_CLIENT_ID",
+          !(process.env.GOOGLE_CLIENT_SECRET || process.env.CLIENT_SECRET) && "GOOGLE_CLIENT_SECRET",
+          !process.env.FIREBASE_SERVICE_ACCOUNT && "FIREBASE_SERVICE_ACCOUNT",
+          !process.env.SESSION_SECRET && "SESSION_SECRET",
+          !process.env.APP_URL && "APP_URL"
+        ].filter(Boolean)
+      });
     });
-  });
 
-  app.get("/api/ping", (req, res) => {
-    res.json({ status: "ok", time: new Date().toISOString(), env: process.env.NODE_ENV });
-  });
-
-  app.get("/api/hello", (req, res) => {
-    res.json({ message: "API is alive and returning JSON" });
-  });
-
-  app.get("/api/auth/google/url", (req, res) => {
-    if (!AUTH_ENABLED) return res.status(400).json({ error: "Auth not configured" });
-
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${appUrl}/auth/google/callback`;
-    console.log(`Generating Auth URL with redirectUri: ${redirectUri}`);
-    
-    const url = oauthClient.generateAuthUrl({
-      access_type: 'offline',
-      scope: ['profile', 'email'],
-      redirect_uri: redirectUri
+    apiRouter.get("/ping", (req, res) => {
+      res.json({ status: "ok", time: new Date().toISOString(), env: process.env.NODE_ENV });
     });
-    res.json({ url });
-  });
 
-  app.get("/api/user", (req, res) => {
-    if (!AUTH_ENABLED) {
-      if (process.env.NODE_ENV === "production") {
-        return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
-      }
-      return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
-    }
-    
-    if (req.session.user) {
-      res.json(req.session.user);
-    } else {
-      res.status(401).json({ error: "Unauthorized" });
-    }
-  });
+    apiRouter.get("/hello", (req, res) => {
+      res.json({ message: "API is alive and returning JSON" });
+    });
 
-  app.get("/api/cvs", async (req, res) => {
-    try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    apiRouter.get("/auth/google/url", (req, res) => {
+      if (!AUTH_ENABLED) return res.status(400).json({ error: "Auth not configured" });
 
-      const cvs = await db.getCVs(userId);
-      res.json(cvs);
-    } catch (err: any) {
-      console.error("Error fetching CVs:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/cvs", async (req, res) => {
-    try {
-      const { id, title, content, template, parent_id } = req.body;
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
+      const redirectUri = `${appUrl}/auth/google/callback`;
+      console.log(`Generating Auth URL with redirectUri: ${redirectUri}`);
       
-      const cvData = {
-        user_id: userId,
-        parent_id: parent_id || null,
-        title,
-        content,
-        template
-      };
-
-      await db.saveCV(id, cvData);
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("Error saving CV:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.delete("/api/cvs/:id", async (req, res) => {
-    try {
-      const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
-      if (!userId) return res.status(401).json({ error: "Unauthorized" });
-
-      const success = await db.deleteCV(req.params.id, userId);
-      if (!success) {
-        return res.status(403).json({ error: "Forbidden or not found" });
-      }
-
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("Error deleting CV:", err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy(() => {
-      res.json({ success: true });
+      const url = oauthClient.generateAuthUrl({
+        access_type: 'offline',
+        scope: ['profile', 'email'],
+        redirect_uri: redirectUri
+      });
+      res.json({ url });
     });
-  });
+
+    apiRouter.get("/user", (req, res) => {
+      if (!AUTH_ENABLED) {
+        if (process.env.NODE_ENV === "production") {
+          return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
+        }
+        return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
+      }
+      
+      if (req.session.user) {
+        res.json(req.session.user);
+      } else {
+        res.status(401).json({ error: "Unauthorized" });
+      }
+    });
+
+    apiRouter.get("/cvs", async (req, res) => {
+      try {
+        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+        const cvs = await db.getCVs(userId);
+        res.json(cvs);
+      } catch (err: any) {
+        console.error("Error fetching CVs:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    apiRouter.post("/cvs", async (req, res) => {
+      try {
+        const { id, title, content, template, parent_id } = req.body;
+        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+        
+        const cvData = {
+          user_id: userId,
+          parent_id: parent_id || null,
+          title,
+          content,
+          template
+        };
+
+        await db.saveCV(id, cvData);
+        res.json({ success: true });
+      } catch (err: any) {
+        console.error("Error saving CV:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    apiRouter.delete("/cvs/:id", async (req, res) => {
+      try {
+        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+        const success = await db.deleteCV(req.params.id, userId);
+        if (!success) {
+          return res.status(403).json({ error: "Forbidden or not found" });
+        }
+
+        res.json({ success: true });
+      } catch (err: any) {
+        console.error("Error deleting CV:", err);
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    apiRouter.post("/auth/logout", (req, res) => {
+      req.session.destroy(() => {
+        res.json({ success: true });
+      });
+    });
+
+    // API catch-all
+    apiRouter.all("*", (req, res) => {
+      console.warn(`API 404: ${req.method} ${req.url}`);
+      res.status(404).json({ error: "API route not found", url: req.url });
+    });
+
+    // Mount API Router
+    app.use("/api", apiRouter);
 
   // Auth Callback (Not under /api prefix as it returns HTML)
   app.get("/auth/google/callback", async (req, res) => {
@@ -563,8 +567,9 @@ async function startServer() {
   });
 
   // Catch-all for any other /api requests to prevent falling through to SPA fallback
+  // (This is redundant now with apiRouter, but good for safety)
   app.all("/api/*", (req, res) => {
-    console.warn(`API 404: ${req.method} ${req.url}`);
+    console.warn(`GLOBAL API 404: ${req.method} ${req.url}`);
     res.status(404).json({ error: "API route not found", url: req.url });
   });
 
