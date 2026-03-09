@@ -56,10 +56,10 @@ interface UserProfile {
   picture?: string;
 }
 
-const BACKEND_URL = "https://ais-dev-nminouarwws5lt3so6kax6-35388622855.europe-west2.run.app";
+const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || "https://ais-dev-nminouarwws5lt3so6kax6-35388622855.europe-west2.run.app";
 
 const getApiUrl = (path: string) => {
-  // If we're running on the backend domain, use relative path
+  // If we're already on the backend domain, use relative path
   if (typeof window !== "undefined" && window.location.origin === BACKEND_URL) {
     return path;
   }
@@ -1388,38 +1388,6 @@ export default function App() {
   }
 
   if (view === "dashboard") {
-    // Only block if we are strictly in production AND missing critical auth vars
-    // In AI Studio preview, we should be more lenient but still show the warning
-    if (isProduction && !authEnabled && missingVars.some(v => v.includes("CLIENT"))) {
-      return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white rounded-3xl p-8 shadow-2xl border border-slate-200 text-center">
-            <div className="w-16 h-16 bg-rose-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <AlertCircle className="w-8 h-8 text-rose-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">Configuration Required</h1>
-            <p className="text-slate-500 mb-8">
-              Authentication is not configured. For security reasons, debug mode is disabled in production environments.
-            </p>
-            <div className="bg-slate-50 rounded-2xl p-4 text-left mb-8">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Missing Variables:</p>
-              <ul className="space-y-2">
-                {missingVars.map(v => (
-                  <li key={v} className="flex items-center gap-2 text-sm text-slate-600 font-mono">
-                    <div className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                    {v}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <p className="text-xs text-slate-400">
-              Please ensure these environment variables are set in your AI Studio settings (or deployment platform) and restart the dev server.
-            </p>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10">
