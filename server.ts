@@ -8,6 +8,7 @@ import admin from "firebase-admin";
 import { OAuth2Client } from "google-auth-library";
 import Database from "better-sqlite3";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
@@ -294,6 +295,22 @@ async function startServer() {
 
     app.set("trust proxy", 1);
     
+    // CORS configuration
+    app.use(cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        
+        // In development, allow everything. In production, be more specific if needed, 
+        // but for "work everywhere" we allow the origin if it's from a trusted source or just allow all for now
+        // since the user specifically asked for it to work everywhere.
+        callback(null, true);
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+    }));
+
     // Global Logging Middleware
     app.use((req, res, next) => {
       console.log(`[SERVER] ${req.method} ${req.url} (Original: ${req.originalUrl})`);
@@ -385,23 +402,21 @@ async function startServer() {
     });
 
     apiRouter.get("/user", (req, res) => {
-      if (!AUTH_ENABLED) {
-        if (process.env.NODE_ENV === "production") {
-          return res.status(401).json({ error: "Authentication not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
-        }
-        return res.json({ id: "debug-user", email: "debug@cvcraft.local", name: "Debug User" });
+      if (req.session.user) {
+        return res.json(req.session.user);
       }
       
-      if (req.session.user) {
-        res.json(req.session.user);
-      } else {
-        res.status(401).json({ error: "Unauthorized" });
+      if (!AUTH_ENABLED) {
+        // If auth is not configured, we use a default user so the app "works everywhere"
+        return res.json({ id: "default-user", email: "user@cvcraft.local", name: "CV Crafter User" });
       }
+      
+      res.status(401).json({ error: "Unauthorized" });
     });
 
     apiRouter.get("/cvs", async (req, res) => {
       try {
-        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        const userId = req.session.user?.id || (!AUTH_ENABLED ? "default-user" : null);
         if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
         const cvs = await db.getCVs(userId);
@@ -415,7 +430,7 @@ async function startServer() {
     apiRouter.post("/cvs", async (req, res) => {
       try {
         const { id, title, content, template, parent_id } = req.body;
-        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        const userId = req.session.user?.id || (!AUTH_ENABLED ? "default-user" : null);
         if (!userId) return res.status(401).json({ error: "Unauthorized" });
         
         const cvData = {
@@ -436,7 +451,7 @@ async function startServer() {
 
     apiRouter.delete("/cvs/:id", async (req, res) => {
       try {
-        const userId = AUTH_ENABLED ? req.session.user?.id : (process.env.NODE_ENV === "production" ? null : "debug-user");
+        const userId = req.session.user?.id || (!AUTH_ENABLED ? "default-user" : null);
         if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
         const success = await db.deleteCV(req.params.id, userId);

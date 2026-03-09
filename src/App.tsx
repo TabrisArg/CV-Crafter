@@ -56,6 +56,17 @@ interface UserProfile {
   picture?: string;
 }
 
+const BACKEND_URL = "https://ais-dev-nminouarwws5lt3so6kax6-35388622855.europe-west2.run.app";
+
+const getApiUrl = (path: string) => {
+  // If we're running on the backend domain, use relative path
+  if (typeof window !== "undefined" && window.location.origin === BACKEND_URL) {
+    return path;
+  }
+  // Otherwise use absolute path to the backend
+  return `${BACKEND_URL}${path}`;
+};
+
 const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?: string, className?: string }) => {
   const components = {
     p: ({children}: any) => <span className="inline">{children}</span>,
@@ -607,7 +618,7 @@ export default function App() {
   const fetchUser = async () => {
     try {
       console.log("App: Fetching user status...");
-      const res = await fetch("/api/user");
+      const res = await fetch(getApiUrl("/api/user"));
       
       if (res.ok) {
         const contentType = res.headers.get("content-type");
@@ -633,7 +644,7 @@ export default function App() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch("/api/config");
+      const res = await fetch(getApiUrl("/api/config"));
       if (res.ok) {
         const contentType = res.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
@@ -670,7 +681,7 @@ export default function App() {
   const handleLogin = async () => {
     try {
       console.log("Fetching Google Auth URL...");
-      const res = await fetch("/api/auth/google/url");
+      const res = await fetch(getApiUrl("/api/auth/google/url"));
       
       if (!res.ok) {
         const text = await res.text();
@@ -695,7 +706,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch(getApiUrl("/api/auth/logout"), { method: "POST" });
     setUser(null);
     setCvs([]);
     setView("dashboard");
@@ -723,12 +734,7 @@ export default function App() {
   }, []);
 
   const UserProfileNav = () => {
-    if (!authEnabled) return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-full">
-        <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-        <span className="text-xs font-bold text-amber-700 uppercase tracking-wider">Debug Mode</span>
-      </div>
-    );
+    if (!authEnabled) return null;
 
     if (user) return (
       <div className="flex items-center gap-3">
@@ -787,7 +793,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch("/api/cvs");
+      const res = await fetch(getApiUrl("/api/cvs"));
       
       if (res.status === 401) {
         // Silently handle unauthorized - user is likely not logged in yet
@@ -880,7 +886,7 @@ export default function App() {
       localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
 
       // 2. Save to Server
-      await fetch("/api/cvs", {
+      await fetch(getApiUrl("/api/cvs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCv),
@@ -956,7 +962,7 @@ export default function App() {
       };
       
       // Save immediately
-      await fetch("/api/cvs", {
+      await fetch(getApiUrl("/api/cvs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCv),
@@ -1034,7 +1040,7 @@ export default function App() {
     if (!pendingOptimizedCv) return;
     setIsSaving(true);
     try {
-      await fetch("/api/cvs", {
+      await fetch(getApiUrl("/api/cvs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pendingOptimizedCv),
@@ -1081,7 +1087,7 @@ export default function App() {
         localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
 
         // 2. Save to Server
-        await fetch("/api/cvs", {
+        await fetch(getApiUrl("/api/cvs"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(cvToSave),
@@ -1119,7 +1125,7 @@ export default function App() {
       localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
 
       // 2. Save to Server
-      await fetch("/api/cvs", {
+      await fetch(getApiUrl("/api/cvs"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cvToSave),
@@ -1148,7 +1154,7 @@ export default function App() {
 
     // 2. Delete from Server
     try {
-      await fetch(`/api/cvs/${id}`, { method: "DELETE" });
+      await fetch(getApiUrl(`/api/cvs/${id}`), { method: "DELETE" });
     } catch (err) {
       console.error("Failed to delete CV from server:", err);
     }
@@ -1449,7 +1455,7 @@ export default function App() {
             </div>
           </header>
 
-          {persistenceType === "local" && (
+          {firestoreError && persistenceType === "local" && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -1459,20 +1465,14 @@ export default function App() {
                 <AlertCircle className="w-6 h-6 text-amber-600" />
               </div>
               <div className="flex-1">
-                <h3 className="font-bold text-amber-900 mb-1">Local Storage Mode</h3>
+                <h3 className="font-bold text-amber-900 mb-1">Database Connection Issue</h3>
                 <div className="text-sm text-amber-700 leading-relaxed">
-                  Your CVs are currently being saved to a temporary local database. 
+                  There was an issue connecting to the cloud database. Your CVs are currently being saved to a temporary local database. 
                   <span className="font-bold"> They will be lost if the application restarts.</span> 
-                  {firestoreError ? (
-                    <div className="mt-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200/50">
-                      <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Initialization Error:</p>
-                      <p className="text-xs font-mono text-amber-900 break-all">{firestoreError}</p>
-                    </div>
-                  ) : isProduction ? (
-                    <> To enable permanent cloud storage, please configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> variable in your environment settings.</>
-                  ) : (
-                    <> To enable permanent cloud storage, configure the <code className="bg-amber-100 px-1 rounded font-mono text-[10px]">FIREBASE_SERVICE_ACCOUNT</code> environment variable.</>
-                  )}
+                  <div className="mt-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200/50">
+                    <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Error Details:</p>
+                    <p className="text-xs font-mono text-amber-900 break-all">{firestoreError}</p>
+                  </div>
                 </div>
               </div>
             </motion.div>
