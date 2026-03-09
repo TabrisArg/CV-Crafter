@@ -294,6 +294,14 @@ async function startServer() {
 
     app.set("trust proxy", 1);
     
+    // Trailing slash normalization for API
+    app.use((req, res, next) => {
+      if (req.url.startsWith('/api/') && req.url.endsWith('/') && req.url.length > 5) {
+        req.url = req.url.slice(0, -1);
+      }
+      next();
+    });
+
     app.use(express.json());
     app.use(cookieParser());
   app.use(

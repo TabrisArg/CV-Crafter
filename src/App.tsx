@@ -608,7 +608,15 @@ export default function App() {
     try {
       console.log("App: Fetching user status...");
       const res = await fetch("/api/user");
+      
       if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          const text = await res.text();
+          console.error(`App: User fetch returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
+          setUser(null);
+          return;
+        }
         const data = await res.json();
         console.log("App: User fetched successfully:", data.name);
         setUser(data);
@@ -626,13 +634,25 @@ export default function App() {
   const fetchConfig = async () => {
     try {
       const res = await fetch("/api/config");
-      const data = await res.json();
-      setAuthEnabled(data.authEnabled);
-      setPersistenceType(data.persistenceType);
-      setIsProduction(data.isProduction);
-      setMissingVars(data.missingVars || []);
-      setFirestoreError(data.firestoreError || null);
+      if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          const text = await res.text();
+          console.error(`App: Config fetch returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
+          return;
+        }
+        const data = await res.json();
+        setAuthEnabled(data.authEnabled);
+        setPersistenceType(data.persistenceType);
+        setIsProduction(data.isProduction);
+        setMissingVars(data.missingVars || []);
+        setFirestoreError(data.firestoreError || null);
+      } else {
+        const text = await res.text();
+        console.error(`App: Config fetch failed with status ${res.status}. Body: ${text.substring(0, 100)}`);
+      }
     } catch (err) {
+      console.error("App: Fetch config error:", err);
       setAuthEnabled(false);
       setPersistenceType("local");
       setIsProduction(false);
