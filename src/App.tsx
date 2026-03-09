@@ -604,33 +604,6 @@ export default function App() {
     }
   }, [authEnabled, user]);
 
-  const [apiStatus, setApiStatus] = useState<{status: string, message: string} | null>(null);
-
-  useEffect(() => {
-    const checkApi = async () => {
-      try {
-        console.log("App: Testing API connectivity...");
-        const res = await fetch("/api/test-json");
-        const contentType = res.headers.get("content-type");
-        console.log(`App: API test response status: ${res.status}, content-type: ${contentType}`);
-        
-        if (contentType && contentType.includes("application/json")) {
-          const data = await res.json();
-          console.log("App: API test successful:", data.message);
-          setApiStatus({ status: "ok", message: `API Connected: ${data.timestamp}` });
-        } else {
-          const text = await res.text();
-          console.error("App: API test failed - NOT JSON. Received:", text.substring(0, 100));
-          setApiStatus({ status: "error", message: "API returned HTML instead of JSON. Check server configuration." });
-        }
-      } catch (err: any) {
-        console.error("App: API test error:", err);
-        setApiStatus({ status: "error", message: `API Connection Error: ${err.message}` });
-      }
-    };
-    checkApi();
-  }, []);
-
   const fetchUser = async () => {
     try {
       console.log("App: Fetching user status...");
@@ -2330,12 +2303,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-      {/* Debug API Status */}
-      {apiStatus?.status === "error" && (
-        <div className="fixed bottom-4 right-4 bg-red-500 text-white p-2 rounded shadow-lg text-xs z-50">
-          API Error: {apiStatus.message}
-        </div>
-      )}
     </div>
   );
 }

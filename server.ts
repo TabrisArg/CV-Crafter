@@ -292,33 +292,8 @@ async function startServer() {
     console.log(`Starting server in ${process.env.NODE_ENV} mode`);
     console.log(`APP_URL: ${process.env.APP_URL || "not set"}`);
 
-    const serverLogs: string[] = [];
-    const log = (msg: string) => {
-      const timestamp = new Date().toISOString();
-      const entry = `[${timestamp}] ${msg}`;
-      console.log(entry);
-      serverLogs.push(entry);
-      if (serverLogs.length > 50) serverLogs.shift();
-    };
-
     app.set("trust proxy", 1);
     
-    // Test route at the very top
-    app.get("/api/test-json", (req, res) => {
-      log("Test JSON endpoint hit");
-      res.json({ message: "JSON is working", timestamp: new Date().toISOString(), logs: serverLogs });
-    });
-
-    app.get("/api/server-logs", (req, res) => {
-      res.json({ logs: serverLogs });
-    });
-
-    // Debug middleware to log all requests
-    app.use((req, res, next) => {
-      log(`Request: ${req.method} ${req.url} (Host: ${req.get('host')})`);
-      next();
-    });
-
     app.use(express.json());
     app.use(cookieParser());
   app.use(
