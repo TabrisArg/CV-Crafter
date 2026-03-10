@@ -376,3 +376,55 @@ export async function optimizeCVForJob(cv: CVData, jobDescription: string, jobUr
     throw new Error("AI optimization failed. Please try again.");
   }
 }
+
+export async function translateCV(cv: CVData, targetLanguage: string): Promise<CVData> {
+  const ai = getAI();
+
+  const callAI = async () => {
+    const apiCallPromise = ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: {
+        parts: [
+          { text: `Translate the following CV data into ${targetLanguage}. Maintain the exact same JSON structure.` },
+          { text: `CV DATA: ${JSON.stringify(cv)}` }
+        ]
+      },
+      config: {
+        systemInstruction: `You are a professional translator specializing in CVs and resumes. 
+        Your goal is to translate the provided CV data into the target language while maintaining professional terminology and the exact JSON structure.
+        
+        STRICT RULES:
+        1. JSON ONLY: Your entire response must be a single, valid JSON object.
+        2. NO META-COMMENTARY: Do not include any notes or conversational text.
+        3. TERMINOLOGY: Use standard professional terminology in the target language (e.g., "Experiencia Laboral" for "Experience" in Spanish).
+        4. PRESERVE LINKS: Do NOT translate URLs or link titles unless they are descriptive (e.g., "Portfolio" -> "Portafolio").
+        5. BOLDING: Maintain all Markdown bolding (**text**) in the translated text.
+        6. OUTPUT: Return ONLY valid JSON matching the schema.`,
+        responseMimeType: "application/json",
+        responseSchema: CV_SCHEMA,
+        temperature: 0.1,
+      },
+    });
+
+    const response = await apiCallPromise;
+
+    if (!response.text) {
+      throw new Error("The AI returned an empty response during translation.");
+    }
+
+    try {
+      return JSON.parse(cleanJsonString(response.text));
+    } catch (e) {
+      console.error("JSON Parse Error during translation:", response.text);
+      throw new Error("Failed to parse translated CV.");
+    }
+  };
+
+  try {
+    console.log(`Translating CV to ${targetLanguage}...`);
+    return await withRetry(callAI, 2);
+  } catch (error: any) {
+    console.error("Error translating CV:", error);
+    throw new Error(`AI translation to ${targetLanguage} failed.`);
+  }
+}

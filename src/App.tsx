@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal } from "./lib/gemini";
+import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV } from "./lib/gemini";
 import mammoth from "mammoth";
 import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
@@ -499,6 +499,8 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
+  const [isTranslating, setIsTranslating] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -679,6 +681,10 @@ export default function App() {
   };
 
   const handleLogin = async () => {
+    if (!authEnabled) {
+      alert("Google Authentication is not configured on the server. Please ensure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in your environment variables in AI Studio or your hosting provider.");
+      return;
+    }
     try {
       console.log("Fetching Google Auth URL...");
       const res = await fetch(getApiUrl("/api/auth/google/url"));
@@ -734,8 +740,6 @@ export default function App() {
   }, []);
 
   const UserProfileNav = () => {
-    if (!authEnabled) return null;
-
     if (user) return (
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-end">
@@ -1010,8 +1014,8 @@ export default function App() {
 
       const baseName = currentCv.content.personalInfo?.fullName || currentCv.title.split(" - ")[0];
       const newTitle = optimized.suggestedTitle 
-        ? `${baseName} - ${optimized.suggestedTitle.replace(" - ", " at ")}`
-        : `${baseName} - Optimized`;
+        ? `${optimized.suggestedTitle.replace(" - ", " at ")} - ${baseName}`
+        : `Optimized - ${baseName}`;
 
       const newCv: CV = {
         id: generateId(),
@@ -1163,8 +1167,22 @@ export default function App() {
   };
 
   const handleDownload = async (mode: "standard" | "platform" = "standard") => {
-    const dataToExport = isDiffMode && pendingOptimizedCv ? pendingOptimizedCv.content : currentCv?.content;
+    let dataToExport = isDiffMode && pendingOptimizedCv ? pendingOptimizedCv.content : currentCv?.content;
     if (!dataToExport) return;
+
+    if (selectedLanguage !== "English") {
+      setIsTranslating(true);
+      showToast(`Translating CV to ${selectedLanguage}...`);
+      try {
+        dataToExport = await translateCV(dataToExport, selectedLanguage);
+      } catch (err: any) {
+        showToast(err.message || "Translation failed", "error");
+        setIsTranslating(false);
+        return;
+      } finally {
+        setIsTranslating(false);
+      }
+    }
     
     // Construct a descriptive filename
     let filename = "";
@@ -1176,6 +1194,10 @@ export default function App() {
     } else {
       // Fallback to CV title or default
       filename = isDiffMode && pendingOptimizedCv ? pendingOptimizedCv.title : currentCv?.title || name;
+    }
+
+    if (selectedLanguage !== "English") {
+      filename = `${filename} (${selectedLanguage})`;
     }
     
     // Clean filename for OS compatibility (remove characters that are invalid in filenames)
@@ -1609,10 +1631,12 @@ export default function App() {
               Last saved {new Date(currentCv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
-          <Button variant="outline" onClick={() => setShowJobModal(true)}>
-            <Wand2 className="w-4 h-4 mr-2 text-indigo-600" />
-            Optimize for Job
-          </Button>
+          {!currentCv?.parent_id && (
+            <Button variant="outline" onClick={() => setShowJobModal(true)}>
+              <Wand2 className="w-4 h-4 mr-2 text-indigo-600" />
+              Optimize for Job
+            </Button>
+          )}
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 min-w-[100px] justify-center">
             {isSaving ? (
               <>
@@ -1650,12 +1674,33 @@ export default function App() {
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
                   className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 z-50 overflow-hidden"
                 >
+                  <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Language</span>
+                    <div className="flex gap-1">
+                      {["English", "Spanish"].map((lang) => (
+                        <button
+                          key={lang}
+                          onClick={() => setSelectedLanguage(lang)}
+                          className={clsx(
+                            "px-2 py-1 text-[10px] font-bold rounded-md transition-all",
+                            selectedLanguage === lang 
+                              ? "bg-indigo-100 text-indigo-700" 
+                              : "text-slate-500 hover:bg-slate-100"
+                          )}
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <button 
                     onClick={() => {
                       handleDownload("standard");
                       setShowExportMenu(false);
                     }}
-                    className="w-full flex flex-col gap-1 p-3 hover:bg-slate-50 rounded-xl transition-colors text-left group"
+                    disabled={isTranslating}
+                    className="w-full flex flex-col gap-1 p-3 hover:bg-slate-50 rounded-xl transition-colors text-left group disabled:opacity-50"
                   >
                     <div className="flex items-center gap-2">
                       <Layout className="w-4 h-4 text-indigo-600" />
@@ -1672,7 +1717,8 @@ export default function App() {
                       setShowExportMenu(false);
                       showToast("Generating platform-optimized PDF...");
                     }}
-                    className="w-full flex flex-col gap-1 p-3 hover:bg-indigo-50 rounded-xl transition-colors text-left group"
+                    disabled={isTranslating}
+                    className="w-full flex flex-col gap-1 p-3 hover:bg-indigo-50 rounded-xl transition-colors text-left group disabled:opacity-50"
                   >
                     <div className="flex items-center gap-2">
                       <Cloud className="w-4 h-4 text-emerald-600" />
