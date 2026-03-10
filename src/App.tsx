@@ -57,6 +57,21 @@ interface UserProfile {
 }
 
 const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || "https://ais-dev-nminouarwws5lt3so6kax6-35388622855.europe-west2.run.app";
+console.log(`[DEBUG] Backend URL: ${BACKEND_URL}`);
+
+const checkBackendHealth = async () => {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ping`);
+    if (res.ok) {
+      console.log("[DEBUG] Backend is reachable.");
+    } else {
+      console.warn(`[DEBUG] Backend returned status: ${res.status}`);
+    }
+  } catch (err) {
+    console.error("[DEBUG] Backend is unreachable:", err);
+  }
+};
+checkBackendHealth();
 
 const getApiUrl = (path: string) => {
   // If we're already on the backend domain, use relative path

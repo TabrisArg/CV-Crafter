@@ -291,25 +291,24 @@ async function startServer() {
     const PORT = 3000;
 
     console.log(`Starting server in ${process.env.NODE_ENV} mode`);
-    console.log(`APP_URL: ${process.env.APP_URL || "not set"}`);
+    console.log(`APP_URL: ${process.env.APP_URL || "not set (using relative URLs for auth)"}`);
+    console.log(`GOOGLE_CLIENT_ID: ${process.env.GOOGLE_CLIENT_ID ? "present" : "missing"}`);
+    console.log(`GEMINI_API_KEY: ${process.env.GEMINI_API_KEY ? "present" : "missing (server-side)"}`);
 
     app.set("trust proxy", 1);
     
-    // CORS configuration
+    // CORS configuration - Extremely permissive for "work everywhere" requirement
     app.use(cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl)
-        if (!origin) return callback(null, true);
-        
-        // In development, allow everything. In production, be more specific if needed, 
-        // but for "work everywhere" we allow the origin if it's from a trusted source or just allow all for now
-        // since the user specifically asked for it to work everywhere.
-        callback(null, true);
+        console.log(`[CORS] Request from origin: ${origin || "No Origin"}`);
+        callback(null, true); // Reflect the request origin
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+      exposedHeaders: ["Set-Cookie"]
     }));
+    app.options("*", cors()); // Enable pre-flight for all routes
 
     // Global Logging Middleware
     app.use((req, res, next) => {

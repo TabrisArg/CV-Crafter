@@ -6,7 +6,12 @@ let aiInstance: GoogleGenAI | null = null;
 function getAI() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.error("GEMINI_API_KEY is missing from environment!");
+    const errorMsg = "GEMINI_API_KEY is missing! If you're on Netlify, add it to Site Settings > Environment Variables. If you're in AI Studio, add it to Settings > Secrets.";
+    console.error(errorMsg);
+    // We don't throw here to avoid crashing the whole module on load, 
+    // but the API call will fail with a clear message.
+  } else {
+    console.log(`GEMINI_API_KEY is present (starts with: ${apiKey.substring(0, 4)}...)`);
   }
   return new GoogleGenAI({ apiKey: apiKey || "" });
 }
