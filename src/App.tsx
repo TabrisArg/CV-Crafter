@@ -64,14 +64,16 @@ const checkBackendHealth = async () => {
     const res = await fetch(`${BACKEND_URL}/api/ping`);
     if (res.ok) {
       console.log("[DEBUG] Backend is reachable.");
+      return true;
     } else {
       console.warn(`[DEBUG] Backend returned status: ${res.status}`);
+      return false;
     }
   } catch (err) {
     console.error("[DEBUG] Backend is unreachable:", err);
+    return false;
   }
 };
-checkBackendHealth();
 
 const getApiUrl = (path: string) => {
   // If we're already on the backend domain, use relative path
@@ -516,6 +518,7 @@ export default function App() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isTranslating, setIsTranslating] = useState(false);
+  const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -619,6 +622,8 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
+      const reachable = await checkBackendHealth();
+      setBackendReachable(reachable);
       await fetchConfig();
       await fetchUser();
     };
@@ -1609,6 +1614,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
+      {backendReachable === false && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-amber-800 text-sm flex items-center justify-center gap-2 sticky top-0 z-[100]">
+          <AlertCircle className="w-4 h-4" />
+          <span>Backend is unreachable. Some features may not work. Check your configuration.</span>
+          <button 
+            onClick={async () => {
+              const reachable = await checkBackendHealth();
+              setBackendReachable(reachable);
+              if (reachable) window.location.reload();
+            }}
+            className="underline font-medium ml-2 hover:text-amber-900"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       <AnimatePresence>
         {toast && (
           <motion.div 
