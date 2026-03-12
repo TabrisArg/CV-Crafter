@@ -61,7 +61,7 @@ console.log(`[DEBUG] Backend URL: ${BACKEND_URL}`);
 
 const checkBackendHealth = async () => {
   try {
-    const res = await fetch(`${BACKEND_URL}/api/ping`);
+    const res = await fetch(`${BACKEND_URL}/api/ping`, { credentials: "include" });
     if (res.ok) {
       console.log("[DEBUG] Backend is reachable.");
       return true;
@@ -640,7 +640,7 @@ export default function App() {
   const fetchUser = async () => {
     try {
       console.log("App: Fetching user status...");
-      const res = await fetch(getApiUrl("/api/user"));
+      const res = await fetch(getApiUrl("/api/user"), { credentials: "include" });
       
       if (res.ok) {
         const contentType = res.headers.get("content-type");
@@ -666,7 +666,7 @@ export default function App() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch(getApiUrl("/api/config"));
+      const res = await fetch(getApiUrl("/api/config"), { credentials: "include" });
       if (res.ok) {
         const contentType = res.headers.get("content-type");
         if (!contentType || !contentType.includes("application/json")) {
@@ -707,7 +707,7 @@ export default function App() {
     }
     try {
       console.log("Fetching Google Auth URL...");
-      const res = await fetch(getApiUrl("/api/auth/google/url"));
+      const res = await fetch(getApiUrl("/api/auth/google/url"), { credentials: "include" });
       
       if (!res.ok) {
         const text = await res.text();
@@ -732,7 +732,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await fetch(getApiUrl("/api/auth/logout"), { method: "POST" });
+    await fetch(getApiUrl("/api/auth/logout"), { method: "POST", credentials: "include" });
     setUser(null);
     setCvs([]);
     setView("dashboard");
@@ -817,7 +817,7 @@ export default function App() {
     }
 
     try {
-      const res = await fetch(getApiUrl("/api/cvs"));
+      const res = await fetch(getApiUrl("/api/cvs"), { credentials: "include" });
       
       if (res.status === 401) {
         // Silently handle unauthorized - user is likely not logged in yet
@@ -914,6 +914,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCv),
+        credentials: "include"
       });
       fetchCvs();
     } catch (err) {
@@ -990,6 +991,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCv),
+        credentials: "include"
       });
       fetchCvs();
       playChime();
@@ -1068,6 +1070,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pendingOptimizedCv),
+        credentials: "include"
       });
       
       setCurrentCv(pendingOptimizedCv);
@@ -1115,6 +1118,7 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(cvToSave),
+          credentials: "include"
         });
         
         fetchCvs();
@@ -1153,6 +1157,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cvToSave),
+        credentials: "include"
       });
       
       setCurrentCv(cvToSave);
@@ -1178,7 +1183,7 @@ export default function App() {
 
     // 2. Delete from Server
     try {
-      await fetch(getApiUrl(`/api/cvs/${id}`), { method: "DELETE" });
+      await fetch(getApiUrl(`/api/cvs/${id}`), { method: "DELETE", credentials: "include" });
     } catch (err) {
       console.error("Failed to delete CV from server:", err);
     }

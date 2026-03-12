@@ -299,10 +299,7 @@ async function startServer() {
     
     // CORS configuration - Extremely permissive for "work everywhere" requirement
     app.use(cors({
-      origin: (origin, callback) => {
-        console.log(`[CORS] Request from origin: ${origin || "No Origin"}`);
-        callback(null, true); // Reflect the request origin
-      },
+      origin: true, // Reflect the request origin automatically
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
