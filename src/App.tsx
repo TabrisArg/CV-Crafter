@@ -56,8 +56,8 @@ interface UserProfile {
   picture?: string;
 }
 
-const BACKEND_URL = (import.meta as any).env.VITE_BACKEND_URL || "https://ais-dev-nminouarwws5lt3so6kax6-35388622855.europe-west2.run.app";
-console.log(`[DEBUG] Backend URL: ${BACKEND_URL}`);
+const BACKEND_URL = ""; // Use relative paths for Netlify proxying
+console.log(`[DEBUG] Backend URL: ${BACKEND_URL || "Relative (Netlify Proxy)"}`);
 
 const checkBackendHealth = async () => {
   try {
@@ -76,6 +76,9 @@ const checkBackendHealth = async () => {
 };
 
 const getApiUrl = (path: string) => {
+  // If BACKEND_URL is empty, we're using relative paths (Netlify proxy)
+  if (!BACKEND_URL) return path;
+  
   // If we're already on the backend domain, use relative path
   if (typeof window !== "undefined" && window.location.origin === BACKEND_URL) {
     return path;
