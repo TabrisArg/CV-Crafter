@@ -1660,6 +1660,7 @@ export default function App() {
             onChange={(e) => currentCv && setCurrentCv({ ...currentCv, title: e.target.value })}
             className="border-none font-bold text-lg px-2 py-1 focus:ring-2 focus:ring-indigo-500/10 rounded-lg w-64"
           />
+          <span className="text-[10px] font-bold bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded uppercase tracking-wider">v1.1</span>
         </div>
         <div className="flex items-center gap-3">
           {currentCv?.updated_at && (
