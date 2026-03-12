@@ -355,7 +355,7 @@ const ModernTemplate = ({ data, oldData }: { data: CVData, oldData?: CVData }) =
 );
 
 const MinimalTemplate = ({ data, oldData }: { data: CVData, oldData?: CVData }) => (
-  <div id="cv-preview" className="bg-white p-16 shadow-2xl min-h-[1100px] w-full max-w-[800px] mx-auto text-slate-900 font-serif">
+  <div id="cv-preview" className="bg-white p-16 shadow-2xl min-h-[1100px] w-full max-w-[800px] mx-auto text-slate-900 font-sans">
     <div data-pdf-block className="text-center mb-12">
       <h1 className="text-5xl font-light tracking-tighter mb-4 leading-tight pt-2">
         <DiffText oldText={oldData?.personalInfo?.fullName} newText={data.personalInfo.fullName} />

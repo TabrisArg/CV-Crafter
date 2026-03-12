@@ -315,7 +315,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 
     } else {
       // --- Minimal Template Style ---
-      doc.setFont("times", "normal");
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(36);
       doc.setTextColor(15, 23, 42);
       const nameWidth = doc.getTextWidth(data.personalInfo.fullName);
@@ -364,15 +364,15 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 
       // Summary
       if (data.summary) {
-        doc.setFont("times", "italic");
+        doc.setFont("helvetica", "italic");
         doc.setFontSize(11);
         doc.setTextColor(71, 85, 105);
-        y = renderMarkdownText(data.summary, margin + 10, y, contentWidth - 20, "times", 11, [71, 85, 105]);
+        y = renderMarkdownText(data.summary, margin + 10, y, contentWidth - 20, "helvetica", 11, [71, 85, 105]);
         y += 15;
       }
 
       // Experience
-      doc.setFont("times", "bold");
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
       doc.text("EXPERIENCE", margin, y);
@@ -390,13 +390,13 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 
         // 1. Company & Dates
         const companyText = exp.company || exp.position;
-        doc.setFont("times", "bold");
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(12);
         doc.setTextColor(15, 23, 42);
         doc.text(companyText, margin, y);
         
         const dates = `${exp.startDate} - ${exp.endDate}`;
-        doc.setFont("times", "normal");
+        doc.setFont("helvetica", "normal");
         doc.setFontSize(11);
         const datesWidth = doc.getTextWidth(dates);
         doc.text(dates, margin + contentWidth - datesWidth, y);
@@ -405,13 +405,13 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
         // 2. Position & Location
         const positionText = exp.company ? exp.position : "";
         if (positionText) {
-          doc.setFont("times", "bold");
+          doc.setFont("helvetica", "bold");
           doc.setFontSize(11);
           doc.setTextColor(71, 85, 105);
           doc.text(positionText.toUpperCase(), margin, y);
           
           if (exp.location) {
-            doc.setFont("times", "normal");
+            doc.setFont("helvetica", "normal");
             doc.setFontSize(10);
             const locWidth = doc.getTextWidth(exp.location);
             doc.text(exp.location, margin + contentWidth - locWidth, y);
@@ -421,7 +421,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 
         exp.highlights.forEach((h) => {
           checkPageBreak(15);
-          y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "times", 10.5, [71, 85, 105], "•");
+          y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "helvetica", 10.5, [71, 85, 105], "•");
           y += 2;
         });
       });
@@ -432,7 +432,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       
       // Education
       let eduY = y;
-      doc.setFont("times", "bold");
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
       doc.text("EDUCATION", margin, eduY);
@@ -441,16 +441,16 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       eduY += 8;
 
       data.education?.forEach((edu) => {
-        doc.setFont("times", "bold");
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(10);
         doc.text(edu.school, margin, eduY);
         eduY += 4;
-        doc.setFont("times", "normal");
+        doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
         doc.setTextColor(100, 116, 139);
         doc.text(edu.degree, margin, eduY);
         eduY += 4;
-        doc.setFont("times", "italic");
+        doc.setFont("helvetica", "italic");
         doc.setFontSize(8);
         doc.text(edu.graduationDate, margin, eduY);
         eduY += 10;
@@ -458,7 +458,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 
       // Expertise
       let skillY = y;
-      doc.setFont("times", "bold");
+      doc.setFont("helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(15, 23, 42);
       doc.text("EXPERTISE", margin + colWidth + 5, skillY);
@@ -466,7 +466,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.line(margin + colWidth + 5, skillY, pageWidth - margin, skillY);
       skillY += 8;
 
-      doc.setFont("times", "normal");
+      doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(71, 85, 105);
       data.skills?.forEach((skill) => {
@@ -479,7 +479,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       if (bottomLinks.length > 0) {
         y = Math.max(eduY, skillY) + 15;
         checkPageBreak(20);
-        doc.setFont("times", "bold");
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
         doc.setTextColor(15, 23, 42);
         doc.text("LINKS", margin, y);
@@ -496,7 +496,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
               y += 6;
               checkPageBreak(6);
             }
-            doc.setFont("times", "normal");
+            doc.setFont("helvetica", "normal");
             doc.setFontSize(10);
             doc.setTextColor(79, 70, 229);
             renderLinkedText(link.title, linkX, y, link.url, 10);
