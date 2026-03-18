@@ -23,11 +23,13 @@ import {
   FileUp,
   X,
   AlertCircle,
-  Copy
+  Copy,
+  RefreshCw,
+  Check
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV } from "./lib/gemini";
+import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill } from "./lib/gemini";
 import mammoth from "mammoth";
 import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
@@ -58,34 +60,6 @@ interface UserProfile {
 
 const BACKEND_URL = ""; // Use relative paths for Netlify proxying
 console.log(`[DEBUG] Backend URL: ${BACKEND_URL || "Relative (Netlify Proxy)"}`);
-
-const checkBackendHealth = async () => {
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/ping`, { credentials: "include" });
-    if (res.ok) {
-      console.log("[DEBUG] Backend is reachable.");
-      return true;
-    } else {
-      console.warn(`[DEBUG] Backend returned status: ${res.status}`);
-      return false;
-    }
-  } catch (err) {
-    console.error("[DEBUG] Backend is unreachable:", err);
-    return false;
-  }
-};
-
-const getApiUrl = (path: string) => {
-  // If BACKEND_URL is empty, we're using relative paths (Netlify proxy)
-  if (!BACKEND_URL) return path;
-  
-  // If we're already on the backend domain, use relative path
-  if (typeof window !== "undefined" && window.location.origin === BACKEND_URL) {
-    return path;
-  }
-  // Otherwise use absolute path to the backend
-  return `${BACKEND_URL}${path}`;
-};
 
 const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?: string, className?: string }) => {
   const components = {
@@ -492,17 +466,18 @@ const LOADING_MESSAGES = [
 ];
 
 export default function App() {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [authEnabled, setAuthEnabled] = useState(false);
-  const [persistenceType, setPersistenceType] = useState<"cloud" | "local">("local");
-  const [isProduction, setIsProduction] = useState(false);
-  const [missingVars, setMissingVars] = useState<string[]>([]);
-  const [firestoreError, setFirestoreError] = useState<string | null>(null);
   const [view, setView] = useState<"dashboard" | "editor" | "cv-list">("dashboard");
   const [cvs, setCvs] = useState<CV[]>([]);
   const [currentCv, setCurrentCv] = useState<CV | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isIdentifyingSkills, setIsIdentifyingSkills] = useState(false);
+  const [missingSkills, setMissingSkills] = useState<MissingSkill[]>([]);
+  const [showSkillsModal, setShowSkillsModal] = useState(false);
+  const [currentSkillIndex, setCurrentSkillIndex] = useState(0);
+  const [confirmedSkills, setConfirmedSkills] = useState<Array<{ skill: string, placement: "skills" | string }>>([]);
+  const [selectingExperienceFor, setSelectingExperienceFor] = useState<string | null>(null);
+
   const [rawText, setRawText] = useState("");
   const [jobDesc, setJobDesc] = useState("");
   const [jobUrl, setJobUrl] = useState("");
@@ -521,7 +496,6 @@ export default function App() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isTranslating, setIsTranslating] = useState(false);
-  const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
@@ -624,191 +598,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    const init = async () => {
-      const reachable = await checkBackendHealth();
-      setBackendReachable(reachable);
-      await fetchConfig();
-      await fetchUser();
-    };
-    init();
+    fetchCvs();
   }, []);
-
-  useEffect(() => {
-    // Only fetch CVs if auth is disabled or if we have a user
-    if (!authEnabled || user) {
-      fetchCvs();
-    }
-  }, [authEnabled, user]);
-
-  const fetchUser = async () => {
-    try {
-      console.log("App: Fetching user status...");
-      const res = await fetch(getApiUrl("/api/user"), { credentials: "include" });
-      
-      if (res.ok) {
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          const text = await res.text();
-          console.error(`App: User fetch returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
-          setUser(null);
-          return;
-        }
-        const data = await res.json();
-        console.log("App: User fetched successfully:", data.name);
-        setUser(data);
-      } else {
-        const text = await res.text();
-        console.log(`App: User fetch failed with status ${res.status}. Body: ${text.substring(0, 100)}`);
-        setUser(null);
-      }
-    } catch (err) {
-      console.error("App: Fetch user error:", err);
-      setUser(null);
-    }
-  };
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch(getApiUrl("/api/config"), { credentials: "include" });
-      if (res.ok) {
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          const text = await res.text();
-          console.error(`App: Config fetch returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
-          // Default to local mode if backend is missing (e.g. on static host like Netlify)
-          setAuthEnabled(false);
-          setPersistenceType("local");
-          setIsProduction(false);
-          setMissingVars([]);
-          setFirestoreError(null);
-          return;
-        }
-        const data = await res.json();
-        setAuthEnabled(data.authEnabled);
-        setPersistenceType(data.persistenceType);
-        setIsProduction(data.isProduction);
-        setMissingVars(data.missingVars || []);
-        setFirestoreError(data.firestoreError || null);
-      } else {
-        const text = await res.text();
-        console.error(`App: Config fetch failed with status ${res.status}. Body: ${text.substring(0, 100)}`);
-      }
-    } catch (err) {
-      console.error("App: Fetch config error:", err);
-      setAuthEnabled(false);
-      setPersistenceType("local");
-      setIsProduction(false);
-      setMissingVars([]);
-      setFirestoreError(null);
-    }
-  };
-
-  const handleLogin = async () => {
-    if (!authEnabled) {
-      alert("Google Authentication is not configured on the server. Please ensure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in your environment variables in AI Studio or your hosting provider.");
-      return;
-    }
-    try {
-      console.log("Fetching Google Auth URL...");
-      const res = await fetch(getApiUrl("/api/auth/google/url"), { credentials: "include" });
-      
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Failed to get auth URL: ${res.status}. Body: ${text.substring(0, 100)}`);
-      }
-
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        throw new Error(`Server returned non-JSON for auth URL: ${contentType}. Body: ${text.substring(0, 100)}`);
-      }
-
-      const { url } = await res.json();
-      console.log("Opening auth popup:", url);
-      const authWindow = window.open(url, "oauth_popup", "width=600,height=700");
-      if (!authWindow) {
-        alert("Please allow popups for this site to connect your account.");
-      }
-    } catch (err) {
-      console.error("Login error:", err);
-    }
-  };
-
-  const handleLogout = async () => {
-    await fetch(getApiUrl("/api/auth/logout"), { method: "POST", credentials: "include" });
-    setUser(null);
-    setCvs([]);
-    setView("dashboard");
-  };
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      console.log("App: Received message from origin:", event.origin, "Data:", event.data);
-      
-      // Relaxed origin check for debugging
-      const isTrusted = event.origin === window.location.origin || 
-                        event.origin.endsWith('.run.app') || 
-                        event.origin.includes('localhost');
-      
-      if (isTrusted && event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        console.log("App: OAuth success detected, fetching user in 500ms...");
-        setTimeout(() => {
-          fetchUser();
-          fetchCvs();
-        }, 500);
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  const UserProfileNav = () => {
-    if (user) return (
-      <div className="flex items-center gap-3">
-        <div className="flex flex-col items-end">
-          <span className="text-xs font-bold text-slate-900">{user.name}</span>
-          <span className="text-[10px] text-slate-500">{user.email}</span>
-        </div>
-        {user.picture ? (
-          <img src={user.picture} alt={user.name} className="w-8 h-8 rounded-full border border-slate-200" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-            <User className="w-4 h-4 text-indigo-600" />
-          </div>
-        )}
-        <Button variant="ghost" size="sm" onClick={handleLogout} className="text-slate-400 hover:text-rose-500">
-          <LogOut className="w-4 h-4" />
-        </Button>
-      </div>
-    );
-
-    return (
-      <Button variant="primary" size="sm" onClick={handleLogin} className="bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-sm">
-        <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24">
-          <path
-            fill="#4285F4"
-            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-          />
-          <path
-            fill="#34A853"
-            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-          />
-          <path
-            fill="#FBBC05"
-            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-          />
-          <path
-            fill="#EA4335"
-            d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-          />
-        </svg>
-        Sign in with Google
-      </Button>
-    );
-  };
 
   const fetchCvs = async () => {
-    // Load from local storage first for immediate UI feedback
     const localCvsStr = localStorage.getItem("cv_crafter_cvs");
     let localCvs: CV[] = [];
     if (localCvsStr) {
@@ -818,75 +611,14 @@ export default function App() {
         console.error("Failed to parse local CVs:", e);
       }
     }
+    
+    localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    setCvs(localCvs);
+  };
 
-    try {
-      const res = await fetch(getApiUrl("/api/cvs"), { credentials: "include" });
-      
-      if (res.status === 401) {
-        // Silently handle unauthorized - user is likely not logged in yet
-        // Use local CVs as the source of truth for now
-        setCvs(localCvs);
-        return;
-      }
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Server returned ${res.status}: ${text.substring(0, 100)}`);
-      }
-
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await res.text();
-        throw new Error(`Server returned non-JSON: ${contentType}. Body: ${text.substring(0, 100)}`);
-      }
-
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        const serverCvs = data.map((cv: any) => {
-          let content = cv.content;
-          if (typeof content === 'string') {
-            if (content === "[object Object]" || !content) {
-              content = {};
-            } else {
-              try {
-                content = JSON.parse(content);
-              } catch (e) {
-                console.error(`Failed to parse content for CV ${cv.id}:`, e);
-                content = {};
-              }
-            }
-          } else if (!content) {
-            content = {};
-          }
-          return { ...cv, content };
-        });
-
-        // Merge logic: Server wins for same IDs, but keep local-only ones
-        const mergedMap = new Map<string, CV>();
-        
-        // Add local ones first
-        localCvs.forEach(cv => mergedMap.set(cv.id, cv));
-        
-        // Server ones overwrite local ones with same ID
-        serverCvs.forEach(cv => mergedMap.set(cv.id, cv));
-        
-        const merged = Array.from(mergedMap.values()).sort((a, b) => 
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-        );
-        
-        setCvs(merged);
-        // Sync back to local storage
-        localStorage.setItem("cv_crafter_cvs", JSON.stringify(merged));
-      } else {
-        if (res.status !== 401) {
-          console.error("Failed to fetch CVs:", data.error || "Unknown error");
-        }
-        setCvs(localCvs);
-      }
-    } catch (err) {
-      console.error("Error fetching CVs:", err);
-      setCvs(localCvs);
-    }
+  const saveCvsLocally = async (updatedCvs: CV[]) => {
+    localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
+    setCvs(updatedCvs);
   };
 
   const handleCreateNew = async () => {
@@ -904,27 +636,8 @@ export default function App() {
       updated_at: new Date().toISOString(),
     };
     
-    // Save immediately
-    try {
-      // 1. Save to Local Storage
-      const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-      let localCvs: CV[] = localCvsStr ? JSON.parse(localCvsStr) : [];
-      localCvs.unshift(newCv);
-      localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
-
-      // 2. Save to Server
-      await fetch(getApiUrl("/api/cvs"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCv),
-        credentials: "include"
-      });
-      fetchCvs();
-    } catch (err) {
-      console.error("Failed to save new CV to server, but it's saved locally.");
-      fetchCvs();
-    }
-
+    const updatedCvs = [newCv, ...cvs];
+    await saveCvsLocally(updatedCvs);
     setCurrentCv(newCv);
     setView("editor");
   };
@@ -989,14 +702,8 @@ export default function App() {
         updated_at: new Date().toISOString(),
       };
       
-      // Save immediately
-      await fetch(getApiUrl("/api/cvs"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newCv),
-        credentials: "include"
-      });
-      fetchCvs();
+      const updatedCvs = [newCv, ...cvs];
+      await saveCvsLocally(updatedCvs);
       playChime();
 
       setCurrentCv(newCv);
@@ -1011,12 +718,17 @@ export default function App() {
     }
   };
 
-  const handleOptimize = async () => {
-    if ((optimizeTab === "manual" && !jobDesc.trim()) || (optimizeTab === "link" && !jobUrl.trim()) || !currentCv) return;
+  const runFinalOptimization = async (additionalSkills: Array<{ skill: string, placement: "skills" | string }>) => {
+    if (!currentCv) return;
     setIsOptimizing(true);
     setError(null);
     try {
-      const optimized = await optimizeCVForJob(currentCv.content, jobDesc, optimizeTab === "link" ? jobUrl : undefined);
+      const optimized = await optimizeCVForJob(
+        currentCv.content, 
+        jobDesc, 
+        optimizeTab === "link" ? jobUrl : undefined,
+        additionalSkills
+      );
       
       // Force preserve ALL original custom links
       const originalLinks = currentCv.content.customLinks || [];
@@ -1054,6 +766,7 @@ export default function App() {
       setPendingOptimizedCv(newCv);
       setIsDiffMode(true);
       setShowJobModal(false);
+      setShowSkillsModal(false);
       setJobDesc("");
       setJobUrl("");
       playChime();
@@ -1065,21 +778,43 @@ export default function App() {
     }
   };
 
+  const handleOptimize = async () => {
+    if ((optimizeTab === "manual" && !jobDesc.trim()) || (optimizeTab === "link" && !jobUrl.trim()) || !currentCv) return;
+    
+    setIsIdentifyingSkills(true);
+    setError(null);
+    try {
+      const missing = await identifyMissingSkills(currentCv.content, jobDesc, optimizeTab === "link" ? jobUrl : undefined);
+      if (missing && missing.length > 0) {
+        setMissingSkills(missing);
+        setCurrentSkillIndex(0);
+        setConfirmedSkills([]);
+        setShowSkillsModal(true);
+        setShowJobModal(false);
+      } else {
+        // No missing skills, proceed to direct optimization
+        await runFinalOptimization([]);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to analyze job requirements. Please try again.");
+      // Fallback to standard optimization if identification fails
+      await runFinalOptimization([]);
+    } finally {
+      setIsIdentifyingSkills(false);
+    }
+  };
+
   const handleCommitOptimization = async () => {
     if (!pendingOptimizedCv) return;
     setIsSaving(true);
     try {
-      await fetch(getApiUrl("/api/cvs"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pendingOptimizedCv),
-        credentials: "include"
-      });
+      const updatedCvs = [pendingOptimizedCv, ...cvs.filter(c => c.id !== pendingOptimizedCv.id)];
+      await saveCvsLocally(updatedCvs);
       
       setCurrentCv(pendingOptimizedCv);
       setPendingOptimizedCv(null);
       setIsDiffMode(false);
-      fetchCvs();
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err) {
@@ -1105,26 +840,15 @@ export default function App() {
         const now = new Date().toISOString();
         const cvToSave = { ...currentCv, updated_at: now };
         
-        // 1. Save to Local Storage
-        const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-        let localCvs: CV[] = localCvsStr ? JSON.parse(localCvsStr) : [];
-        const index = localCvs.findIndex(c => c.id === cvToSave.id);
+        const updatedCvs = [...cvs];
+        const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
         if (index >= 0) {
-          localCvs[index] = cvToSave;
+          updatedCvs[index] = cvToSave;
         } else {
-          localCvs.unshift(cvToSave);
+          updatedCvs.unshift(cvToSave);
         }
-        localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
-
-        // 2. Save to Server
-        await fetch(getApiUrl("/api/cvs"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(cvToSave),
-          credentials: "include"
-        });
         
-        fetchCvs();
+        await saveCvsLocally(updatedCvs);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2000);
       } catch (err) {
@@ -1144,54 +868,29 @@ export default function App() {
       const now = new Date().toISOString();
       const cvToSave = { ...currentCv, updated_at: now };
       
-      // 1. Save to Local Storage
-      const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-      let localCvs: CV[] = localCvsStr ? JSON.parse(localCvsStr) : [];
-      const index = localCvs.findIndex(c => c.id === cvToSave.id);
+      const updatedCvs = [...cvs];
+      const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
       if (index >= 0) {
-        localCvs[index] = cvToSave;
+        updatedCvs[index] = cvToSave;
       } else {
-        localCvs.unshift(cvToSave);
+        updatedCvs.unshift(cvToSave);
       }
-      localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
-
-      // 2. Save to Server
-      await fetch(getApiUrl("/api/cvs"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cvToSave),
-        credentials: "include"
-      });
       
+      await saveCvsLocally(updatedCvs);
       setCurrentCv(cvToSave);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-      fetchCvs();
     } catch (err) {
       console.error(err);
-      setError("Failed to save CV to server, but it's saved locally.");
+      setError("Failed to save CV.");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
-    // 1. Delete from Local Storage
-    const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-    if (localCvsStr) {
-      let localCvs: CV[] = JSON.parse(localCvsStr);
-      localCvs = localCvs.filter(c => c.id !== id);
-      localStorage.setItem("cv_crafter_cvs", JSON.stringify(localCvs));
-    }
-
-    // 2. Delete from Server
-    try {
-      await fetch(getApiUrl(`/api/cvs/${id}`), { method: "DELETE", credentials: "include" });
-    } catch (err) {
-      console.error("Failed to delete CV from server:", err);
-    }
-    
-    fetchCvs();
+    const updatedCvs = cvs.filter(c => c.id !== id);
+    await saveCvsLocally(updatedCvs);
   };
 
   const handleDownload = async (mode: "standard" | "platform" = "standard") => {
@@ -1257,8 +956,6 @@ export default function App() {
                 <FileText className="w-4 h-4 text-indigo-600" />
                 <span className="text-xs font-bold text-indigo-900">{cvs.length} Resumes</span>
               </div>
-              <div className="h-6 w-px bg-slate-200 mx-1" />
-              <UserProfileNav />
             </div>
           </div>
         </nav>
@@ -1299,7 +996,6 @@ export default function App() {
                           <div>
                             <h3 className="font-black text-2xl mb-2 tracking-tight text-slate-900 leading-tight">{cv.title}</h3>
                             <div className="flex items-center gap-2 text-slate-400">
-                              <Cloud className="w-3 h-3" />
                               <p className="text-xs font-medium uppercase tracking-wider">Updated {new Date(cv.updated_at).toLocaleDateString()}</p>
                             </div>
                           </div>
@@ -1358,7 +1054,6 @@ export default function App() {
                           <div>
                             <h3 className="font-black text-2xl mb-2 tracking-tight text-slate-900 leading-tight">{baseCv.title}</h3>
                             <div className="flex items-center gap-2 text-slate-400">
-                              <Cloud className="w-3 h-3" />
                               <p className="text-xs font-medium uppercase tracking-wider">Updated {new Date(baseCv.updated_at).toLocaleDateString()}</p>
                             </div>
                           </div>
@@ -1449,7 +1144,6 @@ export default function App() {
               <span className="font-bold text-xl tracking-tight">CV Craft AI</span>
             </div>
             <div className="flex items-center gap-4">
-              <UserProfileNav />
             </div>
           </div>
         </nav>
@@ -1472,29 +1166,6 @@ export default function App() {
               <p className="text-slate-500">What would you like to build today?</p>
             </div>
           </header>
-
-          {firestoreError && persistenceType === "local" && (
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-8 p-6 bg-amber-50 border border-amber-200 rounded-3xl flex flex-col md:flex-row items-start md:items-center gap-4 shadow-sm"
-            >
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center shrink-0">
-                <AlertCircle className="w-6 h-6 text-amber-600" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-amber-900 mb-1">Database Connection Issue</h3>
-                <div className="text-sm text-amber-700 leading-relaxed">
-                  There was an issue connecting to the cloud database. Your CVs are currently being saved to a temporary local database. 
-                  <span className="font-bold"> They will be lost if the application restarts.</span> 
-                  <div className="mt-2 p-3 bg-amber-100/50 rounded-xl border border-amber-200/50">
-                    <p className="text-xs font-bold text-amber-800 uppercase tracking-widest mb-1">Error Details:</p>
-                    <p className="text-xs font-mono text-amber-900 break-all">{firestoreError}</p>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Create New Card */}
@@ -1622,22 +1293,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-900">
-      {backendReachable === false && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-amber-800 text-sm flex items-center justify-center gap-2 sticky top-0 z-[100]">
-          <AlertCircle className="w-4 h-4" />
-          <span>Backend is unreachable. Some features may not work. Check your configuration.</span>
-          <button 
-            onClick={async () => {
-              const reachable = await checkBackendHealth();
-              setBackendReachable(reachable);
-              if (reachable) window.location.reload();
-            }}
-            className="underline font-medium ml-2 hover:text-amber-900"
-          >
-            Retry
-          </button>
-        </div>
-      )}
       <AnimatePresence>
         {toast && (
           <motion.div 
@@ -1693,18 +1348,14 @@ export default function App() {
                 </motion.div>
                 <span className="text-xs text-slate-500 font-medium">Saving...</span>
               </>
-            ) : saveSuccess ? (
+            ) : (
               <>
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                 <span className="text-xs text-emerald-600 font-medium">Saved</span>
               </>
-            ) : (
-              <>
-                <Cloud className="w-3.5 h-3.5 text-slate-300" />
-                <span className="text-xs text-slate-400 font-medium">Synced</span>
-              </>
             )}
           </div>
+          <div className="h-6 w-px bg-slate-200 mx-2" />
           <div className="relative" ref={exportMenuRef}>
             <Button onClick={() => setShowExportMenu(!showExportMenu)}>
               <Download className="w-4 h-4 mr-2" />
@@ -1766,7 +1417,7 @@ export default function App() {
                     className="w-full flex flex-col gap-1 p-3 hover:bg-indigo-50 rounded-xl transition-colors text-left group disabled:opacity-50"
                   >
                     <div className="flex items-center gap-2">
-                      <Cloud className="w-4 h-4 text-emerald-600" />
+                      <FileText className="w-4 h-4 text-emerald-600" />
                       <span className="text-sm font-bold text-slate-900">Export for Platforms</span>
                     </div>
                     <p className="text-[10px] text-slate-500 leading-tight">ATS-optimized structure. Best for Workday, Greenhouse, and automated portals.</p>
@@ -1795,7 +1446,6 @@ export default function App() {
             </AnimatePresence>
           </div>
           <div className="h-6 w-px bg-slate-200 mx-1" />
-          <UserProfileNav />
         </div>
       </nav>
 
@@ -2384,9 +2034,9 @@ export default function App() {
                   variant="primary" 
                   className="flex-1" 
                   onClick={handleOptimize}
-                  disabled={isOptimizing || (optimizeTab === "manual" ? !jobDesc.trim() : !jobUrl.trim())}
+                  disabled={isOptimizing || isIdentifyingSkills || (optimizeTab === "manual" ? !jobDesc.trim() : !jobUrl.trim())}
                 >
-                  {isOptimizing ? (
+                  {isOptimizing || isIdentifyingSkills ? (
                     <div className="flex flex-col items-center gap-1">
                       <div className="flex items-center gap-2">
                         <motion.div
@@ -2395,12 +2045,172 @@ export default function App() {
                         >
                           <Wand2 className="w-4 h-4" />
                         </motion.div>
-                        <span>Optimizing...</span>
+                        <span>{isIdentifyingSkills ? "Analyzing Job..." : "Optimizing..."}</span>
                       </div>
                       <span className="text-[10px] font-normal opacity-70">{loadingMessage}</span>
                     </div>
                   ) : "Optimize Now"}
                 </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Skills Check Modal */}
+      <AnimatePresence>
+        {showSkillsModal && missingSkills.length > 0 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white rounded-3xl p-8 w-full max-w-lg shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                    <CheckCircle2 className="text-emerald-600 w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold">Skill Verification</h2>
+                    <p className="text-slate-500 text-xs">Step {currentSkillIndex + 1} of {missingSkills.length}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowSkillsModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mb-8">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 mb-4">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1 block">Missing Skill</span>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">{missingSkills[currentSkillIndex].skill}</h3>
+                  <p className="text-sm text-slate-600 leading-relaxed italic">
+                    "{missingSkills[currentSkillIndex].reason}"
+                  </p>
+                </div>
+
+                <p className="text-sm font-medium text-slate-700 mb-4">Do you have experience with this skill?</p>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <Button 
+                    variant="outline" 
+                    className="h-12 rounded-xl border-slate-200 hover:bg-slate-50"
+                    onClick={() => {
+                      if (currentSkillIndex < missingSkills.length - 1) {
+                        setCurrentSkillIndex(prev => prev + 1);
+                      } else {
+                        setShowSkillsModal(false);
+                        runFinalOptimization(confirmedSkills);
+                      }
+                    }}
+                  >
+                    No, skip it
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    className="h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100"
+                    onClick={() => {
+                      const skill = missingSkills[currentSkillIndex];
+                      if (skill.suggestedPlacement === "experience" && currentCv?.content.experience.length) {
+                        setSelectingExperienceFor(skill.skill);
+                      } else {
+                        const newConfirmed = [...confirmedSkills, { skill: skill.skill, placement: "skills" }];
+                        setConfirmedSkills(newConfirmed);
+                        if (currentSkillIndex < missingSkills.length - 1) {
+                          setCurrentSkillIndex(prev => prev + 1);
+                        } else {
+                          setShowSkillsModal(false);
+                          runFinalOptimization(newConfirmed);
+                        }
+                      }
+                    }}
+                  >
+                    Yes, I have it
+                  </Button>
+                </div>
+              </div>
+
+              {/* Experience Selection Overlay */}
+              <AnimatePresence>
+                {selectingExperienceFor && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute inset-0 bg-white rounded-3xl p-8 flex flex-col z-10"
+                  >
+                    <h3 className="text-lg font-bold mb-2">Where did you use this?</h3>
+                    <p className="text-slate-500 text-sm mb-6">Select the position where you used **{selectingExperienceFor}**.</p>
+                    
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                      {currentCv?.content.experience.map((exp, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            const newConfirmed = [...confirmedSkills, { skill: selectingExperienceFor, placement: exp.company }];
+                            setConfirmedSkills(newConfirmed);
+                            setSelectingExperienceFor(null);
+                            if (currentSkillIndex < missingSkills.length - 1) {
+                              setCurrentSkillIndex(prev => prev + 1);
+                            } else {
+                              setShowSkillsModal(false);
+                              runFinalOptimization(newConfirmed);
+                            }
+                          }}
+                          className="w-full p-4 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
+                        >
+                          <div className="font-bold text-slate-900 group-hover:text-indigo-700">{exp.position}</div>
+                          <div className="text-xs text-slate-500">{exp.company}</div>
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const newConfirmed = [...confirmedSkills, { skill: selectingExperienceFor, placement: "skills" }];
+                          setConfirmedSkills(newConfirmed);
+                          setSelectingExperienceFor(null);
+                          if (currentSkillIndex < missingSkills.length - 1) {
+                            setCurrentSkillIndex(prev => prev + 1);
+                          } else {
+                            setShowSkillsModal(false);
+                            runFinalOptimization(newConfirmed);
+                          }
+                        }}
+                        className="w-full p-4 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
+                      >
+                        <div className="font-bold text-slate-900 group-hover:text-indigo-700">Just add to Skills section</div>
+                        <div className="text-xs text-slate-500">General list</div>
+                      </button>
+                    </div>
+                    
+                    <Button 
+                      variant="ghost" 
+                      className="mt-4"
+                      onClick={() => setSelectingExperienceFor(null)}
+                    >
+                      Back
+                    </Button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="flex justify-center gap-1 mt-4">
+                {missingSkills.map((_, i) => (
+                  <div 
+                    key={i} 
+                    className={cn(
+                      "h-1 rounded-full transition-all",
+                      i === currentSkillIndex ? "w-4 bg-indigo-600" : "w-1 bg-slate-200"
+                    )} 
+                  />
+                ))}
               </div>
             </motion.div>
           </div>

@@ -22,6 +22,12 @@ export interface CustomLink {
   position?: "header" | "bottom";
 }
 
+export interface MissingSkill {
+  skill: string;
+  reason: string;
+  suggestedPlacement: "skills" | "experience";
+}
+
 export interface CVData {
   personalInfo: {
     fullName: string;
@@ -308,7 +314,64 @@ export async function generateCVFromText(text: string): Promise<CVData> {
   }
 }
 
-export async function optimizeCVForJob(cv: CVData, jobDescription: string, jobUrl?: string): Promise<CVData> {
+export async function identifyMissingSkills(cv: CVData, jobDescription: string, jobUrl?: string): Promise<MissingSkill[]> {
+  const ai = getAI();
+
+  const callAI = async () => {
+    const userPrompt = jobUrl 
+      ? `Identify missing skills for the job at ${jobUrl}. ${jobDescription ? `Additional context: ${jobDescription}` : ""}`
+      : `Identify missing skills for this job description: ${jobDescription}`;
+
+    const apiCallPromise = ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: {
+        parts: [
+          { text: `CURRENT CV: ${JSON.stringify({ skills: cv.skills, experience: cv.experience.map(e => ({ company: e.company, position: e.position })) })}` },
+          { text: `TARGET JOB: ${userPrompt}` }
+        ]
+      },
+      config: {
+        systemInstruction: `You are a career coach. Analyze the TARGET JOB and the CURRENT CV. 
+        Identify the top 5-8 critical technical or soft skills required by the job that are NOT explicitly mentioned in the CV.
+        
+        For each missing skill, provide:
+        1. 'skill': The name of the skill.
+        2. 'reason': Why this skill is crucial for this specific job.
+        3. 'suggestedPlacement': Whether this skill is best added to the general 'skills' list or integrated into a past 'experience' entry.
+        
+        OUTPUT: Return ONLY a JSON array of objects matching the schema. No conversational text.`,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              skill: { type: Type.STRING },
+              reason: { type: Type.STRING },
+              suggestedPlacement: { type: Type.STRING, enum: ["skills", "experience"] }
+            },
+            required: ["skill", "reason", "suggestedPlacement"]
+          }
+        },
+        temperature: 0.1,
+        tools: jobUrl ? [{ urlContext: {} }] : undefined,
+      },
+    });
+
+    const response = await apiCallPromise;
+    if (!response.text) throw new Error("Empty response from AI");
+    return JSON.parse(cleanJsonString(response.text));
+  };
+
+  try {
+    return await withRetry(callAI, 2);
+  } catch (error) {
+    console.error("Error identifying missing skills:", error);
+    return []; // Return empty if it fails, fallback to standard optimization
+  }
+}
+
+export async function optimizeCVForJob(cv: CVData, jobDescription: string, jobUrl?: string, additionalSkills?: Array<{ skill: string, placement: "skills" | string }>): Promise<CVData> {
   const ai = getAI();
 
   const callAI = async () => {
@@ -323,29 +386,35 @@ export async function optimizeCVForJob(cv: CVData, jobDescription: string, jobUr
       ? `Optimize this CV for the job at ${jobUrl}. ${jobDescription ? `Additional context: ${jobDescription}` : ""}`
       : `Optimize this CV for this job description: ${jobDescription}`;
 
+    const skillsContext = additionalSkills && additionalSkills.length > 0
+      ? `\n\nADDITIONAL CONFIRMED SKILLS TO INCLUDE:
+      ${additionalSkills.map(s => `- ${s.skill} (Add to: ${s.placement})`).join("\n")}`
+      : "";
+
     const apiCallPromise = ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: {
         parts: [
           { text: `SOURCE CV (The Truth): ${JSON.stringify(cv)}` },
-          { text: `TARGET JOB: ${userPrompt}` }
+          { text: `TARGET JOB: ${userPrompt}${skillsContext}` }
         ]
       },
       config: {
         systemInstruction: `You are an expert recruiter and CV optimization engine. Your goal is to tailor a CV to a specific job description while maintaining absolute integrity.
         
         STRICT RULES:
-        1. ABSOLUTE INTEGRITY: Truthfulness is your highest priority. Never invent new roles, companies, dates, skills, or achievements. If a skill or tool is not present in the SOURCE CV, do NOT add it to the optimized version, even if the TARGET JOB requires it.
-        2. EXHAUSTIVE PRESERVATION: You MUST include EVERY experience entry from the SOURCE CV. Do not skip or merge any entries.
-        3. STRATEGIC REPHRASING: Use keywords from the TARGET JOB to describe EXISTING experiences from the SOURCE CV. Example: If job asks for "Stakeholder Management" and CV says "Client communication", rephrase to "Managed stakeholder expectations and communications".
-        4. SELECTIVE EMPHASIS: Prioritize existing points that match the job requirements. You may elaborate on existing details using keywords, but do NOT add new responsibilities. You may shorten irrelevant highlights, but you MUST NEVER remove an entire experience entry (position/company).
-        5. FIELD ISOLATION: Never include dates, locations, or company names within the 'highlights' bullet points. These must remain strictly in their dedicated JSON fields.
-        6. NO HALLUCINATION: Do not invent metrics (e.g., "increased sales by 20%") or technologies if they aren't in the SOURCE CV.
-        7. PRESERVE LINKS: You MUST keep all 'customLinks' from the original CV exactly as they are.
-        8. BOLDING: Use Markdown bolding (**text**) for key keywords and metrics that match the job description.
-        9. MATCH RATE: Calculate a 'matchRate' (1-10) for the 'original' CV vs the job, and the 'optimized' CV vs the job. Provide a brief 'explanation'.
-        10. TITLE: Suggest a title in 'suggestedTitle' as "[Position] - [Company]".
-        11. OUTPUT: Return ONLY valid JSON matching the schema. No conversational text.`,
+        1. ABSOLUTE INTEGRITY: Truthfulness is your highest priority. Never invent new roles, companies, dates, or achievements. 
+        2. ADDITIONAL SKILLS: You have been provided with a list of 'ADDITIONAL CONFIRMED SKILLS'. The user has confirmed they possess these. You MUST integrate them into the CV as specified (either in the 'skills' section or within the 'highlights' of the specified company/experience).
+        3. NO OTHER HALLUCINATIONS: Aside from the 'ADDITIONAL CONFIRMED SKILLS', do NOT add any other skills or tools not present in the SOURCE CV.
+        4. EXHAUSTIVE PRESERVATION: You MUST include EVERY experience entry from the SOURCE CV. Do not skip or merge any entries.
+        5. STRATEGIC REPHRASING: Use keywords from the TARGET JOB to describe EXISTING experiences from the SOURCE CV.
+        6. SELECTIVE EMPHASIS: Prioritize existing points that match the job requirements.
+        7. FIELD ISOLATION: Never include dates, locations, or company names within the 'highlights' bullet points.
+        8. PRESERVE LINKS: You MUST keep all 'customLinks' from the original CV exactly as they are.
+        9. BOLDING: Use Markdown bolding (**text**) for key keywords and metrics that match the job description.
+        10. MATCH RATE: Calculate a 'matchRate' (1-10) for the 'original' CV vs the job, and the 'optimized' CV vs the job.
+        11. TITLE: Suggest a title in 'suggestedTitle' as "[Position] - [Company]".
+        12. OUTPUT: Return ONLY valid JSON matching the schema. No conversational text.`,
         responseMimeType: "application/json",
         responseSchema: CV_SCHEMA,
         temperature: 0.1,
