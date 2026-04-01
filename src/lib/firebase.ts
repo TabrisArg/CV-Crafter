@@ -6,11 +6,17 @@ import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase SDK
+console.log("[DEBUG] Initializing Firebase with Project ID:", firebaseConfig.projectId);
 const app = initializeApp(firebaseConfig);
+
 // Use the provided database ID if it's not the default one
-export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+const dbId = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+  ? firebaseConfig.firestoreDatabaseId
+  : undefined;
+
+console.log("[DEBUG] Using Firestore Database ID:", dbId || "(default)");
+
+export const db = dbId ? getFirestore(app, dbId) : getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
