@@ -19,7 +19,6 @@ import {
   Edit3,
   CheckCircle2,
   Sparkles,
-  Cloud,
   FileUp,
   X,
   AlertCircle,
@@ -35,6 +34,9 @@ import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
+import { auth, db, loginWithGoogle, logout, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, setDoc, collection, query, where, onSnapshot, deleteDoc } from "firebase/firestore";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -49,6 +51,7 @@ interface CV {
   template: string;
   updated_at: string;
   parent_id?: string;
+  userId?: string;
 }
 
 interface UserProfile {
@@ -468,6 +471,8 @@ const LOADING_MESSAGES = [
 export default function App() {
   const [view, setView] = useState<"dashboard" | "editor" | "cv-list">("dashboard");
   const [cvs, setCvs] = useState<CV[]>([]);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentCv, setCurrentCv] = useState<CV | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -598,27 +603,88 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchCvs();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
   }, []);
 
-  const fetchCvs = async () => {
-    const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-    let localCvs: CV[] = [];
-    if (localCvsStr) {
-      try {
-        localCvs = JSON.parse(localCvsStr);
-      } catch (e) {
-        console.error("Failed to parse local CVs:", e);
-      }
-    }
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
     
-    localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    setCvs(localCvs);
-  };
+    const setupCvs = async () => {
+      if (isAuthReady) {
+        if (user) {
+          // Fetch from Firestore
+          const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
+          unsubscribe = onSnapshot(q, (snapshot) => {
+            const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
+            firestoreCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+            setCvs(firestoreCvs);
+          }, (error) => {
+            handleFirestoreError(error, OperationType.LIST, "cvs");
+          });
+        } else {
+          // Fetch from LocalStorage
+          const localCvsStr = localStorage.getItem("cv_crafter_cvs");
+          let localCvs: CV[] = [];
+          if (localCvsStr) {
+            try {
+              localCvs = JSON.parse(localCvsStr);
+            } catch (e) {
+              console.error("Failed to parse local CVs:", e);
+            }
+          }
+          localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+          setCvs(localCvs);
+        }
+      }
+    };
+
+    setupCvs();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [isAuthReady, user?.uid]);
 
   const saveCvsLocally = async (updatedCvs: CV[]) => {
-    localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
-    setCvs(updatedCvs);
+    if (!user) {
+      localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
+      setCvs(updatedCvs);
+    }
+  };
+
+  const saveCvToFirestore = async (cv: CV) => {
+    if (user) {
+      const cvToSave = { ...cv, userId: user.uid };
+      try {
+        await setDoc(doc(db, "cvs", cv.id), cvToSave);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `cvs/${cv.id}`);
+      }
+    }
+  };
+
+  const handleLogin = async () => {
+    try {
+      await loginWithGoogle();
+      showToast("Logged in successfully!");
+    } catch (err) {
+      showToast("Failed to login", "error");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      showToast("Logged out successfully!");
+      setView("dashboard");
+      setCurrentCv(null);
+    } catch (err) {
+      showToast("Failed to logout", "error");
+    }
   };
 
   const handleCreateNew = async () => {
@@ -634,10 +700,15 @@ export default function App() {
       },
       template: "modern",
       updated_at: new Date().toISOString(),
+      userId: user?.uid
     };
     
-    const updatedCvs = [newCv, ...cvs];
-    await saveCvsLocally(updatedCvs);
+    if (user) {
+      await saveCvToFirestore(newCv);
+    } else {
+      const updatedCvs = [newCv, ...cvs];
+      await saveCvsLocally(updatedCvs);
+    }
     setCurrentCv(newCv);
     setView("editor");
   };
@@ -700,10 +771,15 @@ export default function App() {
         content,
         template: "modern",
         updated_at: new Date().toISOString(),
+        userId: user?.uid
       };
       
-      const updatedCvs = [newCv, ...cvs];
-      await saveCvsLocally(updatedCvs);
+      if (user) {
+        await saveCvToFirestore(newCv);
+      } else {
+        const updatedCvs = [newCv, ...cvs];
+        await saveCvsLocally(updatedCvs);
+      }
       playChime();
 
       setCurrentCv(newCv);
@@ -761,6 +837,7 @@ export default function App() {
         template: currentCv.template,
         updated_at: new Date().toISOString(),
         parent_id: currentCv.parent_id || currentCv.id, // Link to the base CV
+        userId: user?.uid
       };
       
       setPendingOptimizedCv(newCv);
@@ -866,17 +943,21 @@ export default function App() {
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const cvToSave = { ...currentCv, updated_at: now };
+      const cvToSave = { ...currentCv, updated_at: now, userId: user?.uid };
       
-      const updatedCvs = [...cvs];
-      const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
-      if (index >= 0) {
-        updatedCvs[index] = cvToSave;
+      if (user) {
+        await saveCvToFirestore(cvToSave);
       } else {
-        updatedCvs.unshift(cvToSave);
+        const updatedCvs = [...cvs];
+        const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
+        if (index >= 0) {
+          updatedCvs[index] = cvToSave;
+        } else {
+          updatedCvs.unshift(cvToSave);
+        }
+        await saveCvsLocally(updatedCvs);
       }
       
-      await saveCvsLocally(updatedCvs);
       setCurrentCv(cvToSave);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
@@ -889,8 +970,16 @@ export default function App() {
   };
 
   const handleDelete = async (id: string) => {
-    const updatedCvs = cvs.filter(c => c.id !== id);
-    await saveCvsLocally(updatedCvs);
+    if (user) {
+      try {
+        await deleteDoc(doc(db, "cvs", id));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `cvs/${id}`);
+      }
+    } else {
+      const updatedCvs = cvs.filter(c => c.id !== id);
+      await saveCvsLocally(updatedCvs);
+    }
   };
 
   const handleDownload = async (mode: "standard" | "platform" = "standard") => {
@@ -1144,6 +1233,35 @@ export default function App() {
               <span className="font-bold text-xl tracking-tight">CV Craft AI</span>
             </div>
             <div className="flex items-center gap-4">
+              {user ? (
+                <div className="flex items-center gap-3">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-xs font-bold text-slate-900">{user.displayName}</p>
+                    <p className="text-[10px] text-slate-500">{user.email}</p>
+                  </div>
+                  <div className="relative group">
+                    <img 
+                      src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
+                      alt={user.displayName || "User"} 
+                      className="w-10 h-10 rounded-full border-2 border-indigo-100 shadow-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                    <button 
+                      onClick={handleLogout}
+                      className="absolute top-full right-0 mt-2 hidden group-hover:block bg-white border border-slate-200 rounded-xl shadow-xl p-2 min-w-[120px] z-50"
+                    >
+                      <div className="flex items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold transition-colors">
+                        <LogOut className="w-4 h-4" />
+                        Logout
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" onClick={handleLogin} className="rounded-full px-6">
+                  Login with Google
+                </Button>
+              )}
             </div>
           </div>
         </nav>
@@ -1162,8 +1280,12 @@ export default function App() {
           )}
           <header className="mb-12 flex items-center justify-between">
             <div>
-              <h1 className="text-4xl font-bold tracking-tight mb-2">Welcome Back</h1>
-              <p className="text-slate-500">What would you like to build today?</p>
+              <h1 className="text-4xl font-bold tracking-tight mb-2">
+                {user ? `Welcome Back, ${user.displayName?.split(' ')[0]}` : 'Welcome to CV Craft AI'}
+              </h1>
+              <p className="text-slate-500">
+                {user ? 'Your professional journey continues here.' : 'Build your perfect CV with the power of AI.'}
+              </p>
             </div>
           </header>
 
