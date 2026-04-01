@@ -1230,7 +1230,7 @@ export default function App() {
               <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
                 <FileText className="text-white w-5 h-5" />
               </div>
-              <span className="font-bold text-xl tracking-tight">CV Craft AI</span>
+              <span className="font-bold text-xl tracking-tight">CV Crafter</span>
             </div>
             <div className="flex items-center gap-4">
               {user ? (
@@ -1281,7 +1281,7 @@ export default function App() {
           <header className="mb-12 flex items-center justify-between">
             <div>
               <h1 className="text-4xl font-bold tracking-tight mb-2">
-                {user ? `Welcome Back, ${user.displayName?.split(' ')[0]}` : 'Welcome to CV Craft AI'}
+                {user ? `Welcome Back, ${user.displayName?.split(' ')[0]}` : 'Welcome to CV Crafter'}
               </h1>
               <p className="text-slate-500">
                 {user ? 'Your professional journey continues here.' : 'Build your perfect CV with the power of AI.'}
