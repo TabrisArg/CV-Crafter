@@ -6,6 +6,7 @@ import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase SDK
+console.log("[DEBUG] Full Firebase Config:", JSON.stringify({ ...firebaseConfig, apiKey: "REDACTED" }));
 console.log("[DEBUG] Initializing Firebase with Project ID:", firebaseConfig.projectId);
 const app = initializeApp(firebaseConfig);
 
@@ -79,8 +80,10 @@ interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -97,7 +100,15 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
+  
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+
+  if (errorMessage.includes('Database') && errorMessage.includes('not found')) {
+    console.error(`CRITICAL: The Firestore database "${firebaseConfig.firestoreDatabaseId || '(default)'}" was not found in project "${firebaseConfig.projectId}". Please verify the Project ID and Database ID in your Firebase Console.`);
+  } else if (errorMessage.includes('project') && errorMessage.includes('not found')) {
+    console.error(`CRITICAL: The Firebase project "${firebaseConfig.projectId}" was not found. Please check your Project ID in firebase-applet-config.json.`);
+  }
+
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -110,6 +121,10 @@ async function testConnection() {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (errorMessage.includes('the client is offline')) {
       console.error("Please check your Firebase configuration. Ensure the Firestore Database has been created in the Firebase Console.");
+    } else if (errorMessage.includes('Database') && errorMessage.includes('not found')) {
+      console.error(`CRITICAL: The Firestore database "${firebaseConfig.firestoreDatabaseId || '(default)'}" was not found in project "${firebaseConfig.projectId}". Please verify the Project ID and Database ID in your Firebase Console.`);
+    } else if (errorMessage.includes('project') && errorMessage.includes('not found')) {
+      console.error(`CRITICAL: The Firebase project "${firebaseConfig.projectId}" was not found. Please check your Project ID in firebase-applet-config.json.`);
     } else {
       console.warn("Firestore connection test notice (can be ignored if app works):", errorMessage);
     }
