@@ -660,11 +660,18 @@ export default function App() {
     if (user) {
       const cvToSave = { ...cv, userId: user.uid };
       try {
+        // We use a shorter timeout or check for connectivity if possible, 
+        // but for now we just ensure this doesn't block the UI indefinitely if it fails
         await setDoc(doc(db, "cvs", cv.id), cvToSave);
+        return true;
       } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `cvs/${cv.id}`);
+        console.warn("Firestore save failed, work will be cached locally:", error);
+        // Don't call handleFirestoreError here as it throws and blocks the flow
+        // Instead, we'll handle the fallback in the caller
+        return false;
       }
     }
+    return false;
   };
 
   const handleLogin = async () => {
@@ -775,7 +782,15 @@ export default function App() {
       };
       
       if (user) {
-        await saveCvToFirestore(newCv);
+        const savedToCloud = await saveCvToFirestore(newCv);
+        if (!savedToCloud) {
+          // Fallback to local storage if cloud save fails
+          const updatedCvs = [newCv, ...cvs];
+          await saveCvsLocally(updatedCvs);
+          showToast("Saved locally (Cloud sync failed)", "error");
+        } else {
+          showToast("CV saved to cloud!");
+        }
       } else {
         const updatedCvs = [newCv, ...cvs];
         await saveCvsLocally(updatedCvs);
