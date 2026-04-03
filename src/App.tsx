@@ -618,29 +618,39 @@ export default function App() {
     
     const setupCvs = async () => {
       if (isAuthReady) {
+        // Always load from local storage first for immediate feedback
+        const localCvsStr = localStorage.getItem("cv_crafter_cvs");
+        let localCvs: CV[] = [];
+        if (localCvsStr) {
+          try {
+            localCvs = JSON.parse(localCvsStr);
+            localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+            setCvs(localCvs);
+          } catch (e) {
+            console.error("Failed to parse local CVs:", e);
+          }
+        }
+
         if (user) {
-          // Fetch from Firestore
+          // Then sync with Firestore
           const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
           unsubscribe = onSnapshot(q, (snapshot) => {
             const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
             firestoreCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-            setCvs(firestoreCvs);
+            
+            // Merge local and firestore (prefer firestore for same IDs)
+            setCvs(prev => {
+              const merged = [...firestoreCvs];
+              prev.forEach(local => {
+                if (!merged.some(f => f.id === local.id)) {
+                  merged.push(local);
+                }
+              });
+              return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+            });
           }, (error) => {
             handleFirestoreError(error, OperationType.LIST, "cvs");
           });
-        } else {
-          // Fetch from LocalStorage
-          const localCvsStr = localStorage.getItem("cv_crafter_cvs");
-          let localCvs: CV[] = [];
-          if (localCvsStr) {
-            try {
-              localCvs = JSON.parse(localCvsStr);
-            } catch (e) {
-              console.error("Failed to parse local CVs:", e);
-            }
-          }
-          localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-          setCvs(localCvs);
         }
       }
     };
@@ -715,10 +725,12 @@ export default function App() {
     
     if (user) {
       await saveCvToFirestore(newCv);
-    } else {
-      const updatedCvs = [newCv, ...cvs];
-      await saveCvsLocally(updatedCvs);
     }
+    
+    // Always update local state for immediate feedback
+    const updatedCvs = [newCv, ...cvs];
+    await saveCvsLocally(updatedCvs);
+    
     setCurrentCv(newCv);
     setView("editor");
   };
@@ -787,17 +799,16 @@ export default function App() {
       if (user) {
         const savedToCloud = await saveCvToFirestore(newCv);
         if (!savedToCloud) {
-          // Fallback to local storage if cloud save fails
-          const updatedCvs = [newCv, ...cvs];
-          await saveCvsLocally(updatedCvs);
           showToast("Saved locally (Cloud sync failed)", "error");
         } else {
           showToast("CV saved to cloud!");
         }
-      } else {
-        const updatedCvs = [newCv, ...cvs];
-        await saveCvsLocally(updatedCvs);
       }
+      
+      // Always update local state for immediate feedback
+      const updatedCvs = [newCv, ...cvs];
+      await saveCvsLocally(updatedCvs);
+      
       playChime();
 
       setCurrentCv(newCv);
@@ -1500,7 +1511,16 @@ export default function App() {
               Optimize for Job
             </Button>
           )}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 min-w-[100px] justify-center">
+          <button 
+            onClick={handleSave}
+            disabled={isSaving}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed group min-w-[100px] justify-center ${
+              saveSuccess 
+                ? "bg-emerald-50 border-emerald-200 text-emerald-600" 
+                : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300"
+            }`}
+            title="Click to save manually"
+          >
             {isSaving ? (
               <>
                 <motion.div
@@ -1509,15 +1529,20 @@ export default function App() {
                 >
                   <Save className="w-3.5 h-3.5 text-slate-400" />
                 </motion.div>
-                <span className="text-xs text-slate-500 font-medium">Saving...</span>
+                <span className="text-xs font-medium">Saving...</span>
+              </>
+            ) : saveSuccess ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="text-xs font-bold">Saved!</span>
               </>
             ) : (
               <>
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="text-xs text-emerald-600 font-medium">Saved</span>
+                <Save className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-500" />
+                <span className="text-xs font-medium group-hover:text-indigo-600">Save</span>
               </>
             )}
-          </div>
+          </button>
           <div className="h-6 w-px bg-slate-200 mx-2" />
           <div className="relative" ref={exportMenuRef}>
             <Button onClick={() => setShowExportMenu(!showExportMenu)}>
