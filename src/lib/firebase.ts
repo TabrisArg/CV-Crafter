@@ -28,12 +28,17 @@ export const loginWithGoogle = async () => {
     const user = result.user;
     
     // Save user profile to Firestore
-    await setDoc(doc(db, 'users', user.uid), {
-      id: user.uid,
-      email: user.email || '',
-      name: user.displayName || '',
-      picture: user.photoURL || ''
-    }, { merge: true });
+    const userPath = `users/${user.uid}`;
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        id: user.uid,
+        email: user.email || '',
+        name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
+        picture: user.photoURL || ''
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, userPath);
+    }
     
     return user;
   } catch (error) {

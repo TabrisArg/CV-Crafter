@@ -264,10 +264,13 @@ const ModernTemplate = ({ data, oldData }: { data: CVData, oldData?: CVData }) =
               </span>
               <span className="text-xs text-slate-400">{exp.location}</span>
             </div>
-            <ul className="list-disc list-inside text-sm text-slate-600 space-y-1">
+            <ul className="space-y-2">
               {exp.highlights?.map((h, j) => (
-                <li key={j} className="inline-block w-full">
-                  <DiffText oldText={oldData?.experience?.[i]?.highlights?.[j]} newText={h} />
+                <li key={j} className="text-sm text-slate-600 leading-relaxed flex gap-3">
+                  <span className="text-indigo-400 font-bold">•</span>
+                  <div className="inline">
+                    <DiffText oldText={oldData?.experience?.[i]?.highlights?.[j]} newText={h} />
+                  </div>
                 </li>
               ))}
             </ul>
@@ -383,7 +386,7 @@ const MinimalTemplate = ({ data, oldData }: { data: CVData, oldData?: CVData }) 
               <ul className="space-y-2">
                 {exp.highlights?.map((h, j) => (
                   <li key={j} className="text-sm text-slate-600 leading-relaxed flex gap-3">
-                    <span className="text-slate-300">•</span>
+                    <span className="text-slate-400 font-bold">•</span>
                     <div className="inline">
                       <DiffText oldText={oldData?.experience?.[i]?.highlights?.[j]} newText={h} />
                     </div>
@@ -1820,7 +1823,8 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     {exp.highlights?.map((h, j) => (
-                      <div key={j} className="flex gap-2 group/highlight">
+                      <div key={j} className="flex gap-2 group/highlight items-center">
+                        <span className="text-slate-300 font-bold ml-1">•</span>
                         <Input 
                           placeholder="Highlight" 
                           value={h}

@@ -51,7 +51,7 @@ service cloud.firestore {
     }
 
     function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+      return email is string && email.matches(".+@.+\\..+");
     }
 
     function isValidTimestamp(ts) {
@@ -70,24 +70,20 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return hasRequiredFields(['id', 'email', 'name']) &&
-             hasOnlyAllowedFields(['id', 'email', 'name', 'picture', 'role']) &&
              data.id == request.auth.uid &&
              data.email is string && isValidEmail(data.email) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             (!('picture' in data) || (data.picture is string && data.picture.size() < 1000)) &&
-             (!('role' in data) || data.role == 'user'); // Users can't make themselves admin
+             data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
+             (!('picture' in data) || (data.picture is string && data.picture.size() < 2000)) &&
+             (!('role' in data) || data.role == 'user');
     }
 
     function isValidCV(data) {
       return hasRequiredFields(['id', 'title', 'content', 'updated_at', 'userId']) &&
-             hasOnlyAllowedFields(['id', 'title', 'content', 'template', 'updated_at', 'parent_id', 'userId']) &&
              data.id is string && data.id.size() > 0 &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
              data.content is map &&
              data.updated_at is string && isValidTimestamp(data.updated_at) &&
-             data.userId == request.auth.uid &&
-             (!('template' in data) || (data.template is string && data.template.size() < 50)) &&
-             (!('parent_id' in data) || (data.parent_id is string && data.parent_id.size() < 100));
+             data.userId == request.auth.uid;
     }
 
     // ===============================================================
@@ -97,7 +93,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role;
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (!('role' in request.resource.data) || request.resource.data.role == resource.data.role);
       allow delete: if isAdmin();
     }
 
