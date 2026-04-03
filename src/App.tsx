@@ -856,8 +856,8 @@ export default function App() {
 
       const baseName = currentCv.content.personalInfo?.fullName || currentCv.title.split(" - ")[0];
       const newTitle = optimized.suggestedTitle 
-        ? `${optimized.suggestedTitle.replace(" - ", " at ")} - ${baseName}`
-        : `Optimized - ${baseName}`;
+        ? `${baseName} - ${optimized.suggestedTitle.replace(" - ", " at ")}`
+        : `${baseName} - Optimized`;
 
       const newCv: CV = {
         id: generateId(),
@@ -1052,8 +1052,8 @@ export default function App() {
     const name = dataToExport.personalInfo.fullName || "CV";
     
     if (dataToExport.suggestedTitle) {
-      // Format: "Software Engineer - Google - John Doe"
-      filename = `${dataToExport.suggestedTitle} - ${name}`;
+      // Format: "John Doe - Software Engineer - Google"
+      filename = `${name} - ${dataToExport.suggestedTitle}`;
     } else {
       // Fallback to CV title or default
       filename = isDiffMode && pendingOptimizedCv ? pendingOptimizedCv.title : currentCv?.title || name;
