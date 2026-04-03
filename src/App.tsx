@@ -933,17 +933,21 @@ export default function App() {
       setIsSaving(true);
       try {
         const now = new Date().toISOString();
-        const cvToSave = { ...currentCv, updated_at: now };
+        const cvToSave = { ...currentCv, updated_at: now, userId: user?.uid };
         
-        const updatedCvs = [...cvs];
-        const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
-        if (index >= 0) {
-          updatedCvs[index] = cvToSave;
+        if (user) {
+          await saveCvToFirestore(cvToSave);
         } else {
-          updatedCvs.unshift(cvToSave);
+          const updatedCvs = [...cvs];
+          const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
+          if (index >= 0) {
+            updatedCvs[index] = cvToSave;
+          } else {
+            updatedCvs.unshift(cvToSave);
+          }
+          await saveCvsLocally(updatedCvs);
         }
         
-        await saveCvsLocally(updatedCvs);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2000);
       } catch (err) {
@@ -954,7 +958,7 @@ export default function App() {
     }, 2000); // 2 second debounce
 
     return () => clearTimeout(timer);
-  }, [currentCv?.content, currentCv?.title, currentCv?.template]);
+  }, [currentCv?.content, currentCv?.title, currentCv?.template, user?.uid]);
 
   const handleSave = async () => {
     if (!currentCv) return;
