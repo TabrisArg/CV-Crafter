@@ -653,24 +653,21 @@ export default function App() {
   }, [isAuthReady, user?.uid]);
 
   const saveCvsLocally = async (updatedCvs: CV[]) => {
-    if (!user) {
-      localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
-      setCvs(updatedCvs);
-    }
+    localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
+    // Always update the local state for immediate UI feedback
+    setCvs(updatedCvs);
   };
 
   const saveCvToFirestore = async (cv: CV) => {
     if (user) {
       const cvToSave = { ...cv, userId: user.uid };
+      console.log("[DEBUG] Saving CV to Firestore:", cvToSave.id, "for user:", user.uid);
       try {
-        // We use a shorter timeout or check for connectivity if possible, 
-        // but for now we just ensure this doesn't block the UI indefinitely if it fails
         await setDoc(doc(db, "cvs", cv.id), cvToSave);
+        console.log("[DEBUG] Firestore save successful");
         return true;
       } catch (error) {
-        console.warn("Firestore save failed, work will be cached locally:", error);
-        // Don't call handleFirestoreError here as it throws and blocks the flow
-        // Instead, we'll handle the fallback in the caller
+        console.error("[DEBUG] Firestore save failed:", error);
         return false;
       }
     }
@@ -688,6 +685,9 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
+      if (view === "editor" && currentCv) {
+        await handleSave();
+      }
       await logout();
       showToast("Logged out successfully!");
       setView("dashboard");
@@ -935,21 +935,27 @@ export default function App() {
         const now = new Date().toISOString();
         const cvToSave = { ...currentCv, updated_at: now, userId: user?.uid };
         
+        let success = false;
         if (user) {
-          await saveCvToFirestore(cvToSave);
-        } else {
-          const updatedCvs = [...cvs];
-          const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
-          if (index >= 0) {
-            updatedCvs[index] = cvToSave;
-          } else {
-            updatedCvs.unshift(cvToSave);
-          }
-          await saveCvsLocally(updatedCvs);
+          success = await saveCvToFirestore(cvToSave);
         }
         
-        setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2000);
+        // Always save locally as a backup/cache
+        const updatedCvs = [...cvs];
+        const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
+        if (index >= 0) {
+          updatedCvs[index] = cvToSave;
+        } else {
+          updatedCvs.unshift(cvToSave);
+        }
+        await saveCvsLocally(updatedCvs);
+        
+        if (!user || success) {
+          setSaveSuccess(true);
+          setTimeout(() => setSaveSuccess(false), 2000);
+        } else {
+          showToast("Cloud save failed, work cached locally", "error");
+        }
       } catch (err) {
         console.error("Auto-save failed:", err);
       } finally {
@@ -967,24 +973,32 @@ export default function App() {
       const now = new Date().toISOString();
       const cvToSave = { ...currentCv, updated_at: now, userId: user?.uid };
       
+      let success = false;
       if (user) {
-        await saveCvToFirestore(cvToSave);
-      } else {
-        const updatedCvs = [...cvs];
-        const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
-        if (index >= 0) {
-          updatedCvs[index] = cvToSave;
-        } else {
-          updatedCvs.unshift(cvToSave);
-        }
-        await saveCvsLocally(updatedCvs);
+        success = await saveCvToFirestore(cvToSave);
       }
       
+      // Always save locally as a backup/cache
+      const updatedCvs = [...cvs];
+      const index = updatedCvs.findIndex(c => c.id === cvToSave.id);
+      if (index >= 0) {
+        updatedCvs[index] = cvToSave;
+      } else {
+        updatedCvs.unshift(cvToSave);
+      }
+      await saveCvsLocally(updatedCvs);
+      
       setCurrentCv(cvToSave);
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      
+      if (!user || success) {
+        setSaveSuccess(true);
+        showToast("CV saved successfully", "success");
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        showToast("Cloud save failed, work cached locally", "error");
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Manual save failed:", err);
       setError("Failed to save CV.");
     } finally {
       setIsSaving(false);
@@ -1457,7 +1471,12 @@ export default function App() {
       {/* Editor Header */}
       <nav className="bg-white border-b border-slate-200 px-6 h-16 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => setView("cv-list")}>
+          <Button variant="ghost" size="sm" onClick={async () => {
+            if (view === "editor") {
+              await handleSave();
+            }
+            setView("cv-list");
+          }}>
             <Layout className="w-4 h-4 mr-2" />
             My CVs
           </Button>
