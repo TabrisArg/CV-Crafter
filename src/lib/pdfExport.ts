@@ -514,60 +514,15 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
 };
 
 export const exportForPlatforms = (data: CVData, filename: string) => {
-  console.log("Starting Platform Export for:", filename);
+  console.log("Starting Plain Text Export for:", filename);
   try {
-    const doc = new jsPDF({
-      orientation: "p",
-      unit: "mm",
-      format: "a4",
-    });
+    let text = "";
 
-    const margin = 20;
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const contentWidth = pageWidth - margin * 2;
-    let y = margin;
-
-    const checkPageBreak = (neededHeight: number) => {
-      if (y + neededHeight > 275) {
-        doc.addPage();
-        y = margin;
-        return true;
-      }
-      return false;
-    };
-
-    const renderText = (text: string, x: number, maxWidth: number, fontStyle: "normal" | "bold" = "normal", fontSize: number = 10, color: [number, number, number] = [0, 0, 0]) => {
-      if (!text) return y;
-      
-      try {
-        doc.setFont("helvetica", fontStyle);
-        doc.setFontSize(fontSize);
-        doc.setTextColor(color[0], color[1], color[2]);
-
-        const lines = doc.splitTextToSize(text, maxWidth);
-        const lineHeight = fontSize * 0.45;
-
-        lines.forEach((line: string) => {
-          checkPageBreak(lineHeight);
-          doc.text(line, x, y);
-          y += lineHeight;
-        });
-      } catch (e) {
-        console.warn("Error rendering text block:", e);
-      }
-
-      return y;
-    };
-
-    // 1. Header (Linear & Clean)
+    // 1. Header
     const fullName = (data.personalInfo?.fullName || "RESUME").trim();
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(fullName.toUpperCase(), margin, y);
-    y += 10;
+    text += `${fullName.toUpperCase()}\n`;
+    text += "=".repeat(fullName.length) + "\n\n";
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
     const contactInfo = [
       data.personalInfo?.email,
       data.personalInfo?.phone,
@@ -575,143 +530,98 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
     ].filter(Boolean).join("  |  ");
     
     if (contactInfo) {
-      doc.text(contactInfo, margin, y);
-      y += 6;
+      text += `${contactInfo}\n`;
     }
 
-    // Links in header
     const headerLinks = data.customLinks?.filter(link => link.position === "header" || (!link.position && data.linksPlacement === "header")) || [];
     if (headerLinks.length > 0) {
-      const linksStr = headerLinks.map(l => `${l.title}: ${l.url}`).join("  |  ");
-      y = renderText(linksStr, margin, contentWidth, "normal", 10);
-      y += 4;
-    } else {
-      y += 2;
+      text += headerLinks.map(l => `${l.title}: ${l.url}`).join("  |  ") + "\n";
     }
+    text += "\n";
 
     // 2. Summary
     if (data.summary) {
-      checkPageBreak(15);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("PROFESSIONAL SUMMARY", margin, y);
-      y += 6;
-      y = renderText(data.summary, margin, contentWidth, "normal", 10);
-      y += 10;
+      text += "PROFESSIONAL SUMMARY\n";
+      text += "--------------------\n";
+      text += `${data.summary}\n\n`;
     }
 
-    // 3. Experience (Tight Metadata Blocks)
+    // 3. Experience
     if (data.experience && data.experience.length > 0) {
-      checkPageBreak(15);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("PROFESSIONAL EXPERIENCE", margin, y);
-      y += 8;
+      text += "PROFESSIONAL EXPERIENCE\n";
+      text += "-----------------------\n";
 
       data.experience.forEach((exp) => {
         if (!exp) return;
-        checkPageBreak(25);
         
-        // Company
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text(exp.company || "Company", margin, y);
-        y += 5;
-
-        // Position & Dates
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        const positionLine = `${exp.position || "Position"}  |  ${exp.startDate || ""} - ${exp.endDate || "Present"}`;
-        doc.text(positionLine, margin, y);
-        y += 5;
-
-        // Location
+        text += `${(exp.company || "Company").toUpperCase()}\n`;
+        text += `${exp.position || "Position"}  |  ${exp.startDate || ""} - ${exp.endDate || "Present"}\n`;
         if (exp.location) {
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(10);
-          doc.text(exp.location, margin, y);
-          y += 5;
+          text += `${exp.location}\n`;
         }
 
-        y += 2;
-
-        // Highlights
-        doc.setFont("helvetica", "normal");
         if (exp.highlights && Array.isArray(exp.highlights)) {
           exp.highlights.forEach((h) => {
             if (!h) return;
             const cleanH = String(h).replace(/\*\*/g, ""); // Remove markdown bolding
-            y = renderText(`- ${cleanH}`, margin + 5, contentWidth - 5, "normal", 10);
-            y += 1;
+            text += `- ${cleanH}\n`;
           });
         }
-        y += 6;
+        text += "\n";
       });
     }
 
     // 4. Education
     if (data.education && data.education.length > 0) {
-      checkPageBreak(20);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("EDUCATION", margin, y);
-      y += 8;
+      text += "EDUCATION\n";
+      text += "---------\n";
 
       data.education.forEach((edu) => {
         if (!edu) return;
-        checkPageBreak(15);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text(edu.school || "University", margin, y);
-        y += 5;
-        
-        doc.setFont("helvetica", "normal");
-        const eduDetail = `${edu.degree || ""}${edu.graduationDate ? `  |  ${edu.graduationDate}` : ""}`;
-        doc.text(eduDetail, margin, y);
-        y += 5;
-        
+        text += `${(edu.school || "University").toUpperCase()}\n`;
+        text += `${edu.degree || ""}${edu.graduationDate ? `  |  ${edu.graduationDate}` : ""}\n`;
         if (edu.location) {
-          doc.text(edu.location, margin, y);
-          y += 5;
+          text += `${edu.location}\n`;
         }
-        y += 5;
+        text += "\n";
       });
     }
 
     // 5. Skills
     if (data.skills && data.skills.length > 0) {
-      checkPageBreak(20);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("SKILLS & EXPERTISE", margin, y);
-      y += 8;
-      
+      text += "SKILLS & EXPERTISE\n";
+      text += "------------------\n";
       const skillsStr = Array.isArray(data.skills) ? data.skills.join(", ") : String(data.skills);
-      y = renderText(skillsStr, margin, contentWidth, "normal", 10);
-      y += 10;
+      text += `${skillsStr}\n\n`;
     }
 
     // 6. Additional Links
     const bottomLinks = data.customLinks?.filter(link => link.position === "bottom" || (!link.position && data.linksPlacement === "bottom")) || [];
     if (bottomLinks.length > 0) {
-      checkPageBreak(20);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("ADDITIONAL LINKS", margin, y);
-      y += 8;
-      
+      text += "ADDITIONAL LINKS\n";
+      text += "----------------\n";
       bottomLinks.forEach(link => {
         if (!link || !link.title || !link.url) return;
-        y = renderText(`${link.title}: ${link.url}`, margin, contentWidth, "normal", 10);
-        y += 2;
+        text += `${link.title}: ${link.url}\n`;
       });
+      text += "\n";
     }
 
+    // Trigger download
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
     const finalFilename = (filename || "CV").trim() || "CV";
-    doc.save(`${finalFilename}_Platform.pdf`);
-    console.log("Platform Export Complete");
+    link.download = `${finalFilename}_Platform.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    console.log("Plain Text Export Complete");
   } catch (error) {
-    console.error("Error generating platform PDF:", error);
-    alert("Failed to generate PDF. Please try again or use the 'Copy ATS Text' option.");
+    console.error("Error generating plain text file:", error);
+    alert("Failed to generate text file. Please try again or use the 'Copy ATS Text' option.");
   }
 };

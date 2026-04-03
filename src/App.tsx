@@ -1599,7 +1599,7 @@ export default function App() {
                     onClick={() => {
                       handleDownload("platform");
                       setShowExportMenu(false);
-                      showToast("Generating platform-optimized PDF...");
+                      showToast("Generating platform-optimized text file...");
                     }}
                     disabled={isTranslating}
                     className="w-full flex flex-col gap-1 p-3 hover:bg-indigo-50 rounded-xl transition-colors text-left group disabled:opacity-50"
