@@ -642,11 +642,21 @@ export default function App() {
             setCvs(prev => {
               const merged = [...firestoreCvs];
               prev.forEach(local => {
+                // Only keep local CVs that are NOT in Firestore AND are NOT associated with the current user's cloud account
+                // (This handles the case where a CV was deleted from Firestore)
                 if (!merged.some(f => f.id === local.id)) {
-                  merged.push(local);
+                  const isCloudCv = local.userId === user.uid;
+                  if (!isCloudCv) {
+                    merged.push(local);
+                  }
                 }
               });
-              return merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+              
+              // Update local storage cache with the new merged state
+              const finalCvs = merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+              localStorage.setItem("cv_crafter_cvs", JSON.stringify(finalCvs));
+              
+              return finalCvs;
             });
           }, (error) => {
             handleFirestoreError(error, OperationType.LIST, "cvs");
@@ -1017,15 +1027,20 @@ export default function App() {
   };
 
   const handleDelete = async (id: string) => {
+    // Optimistically update local state for immediate feedback
+    const updatedCvs = cvs.filter(c => c.id !== id);
+    await saveCvsLocally(updatedCvs);
+    
     if (user) {
       try {
         await deleteDoc(doc(db, "cvs", id));
+        showToast("CV deleted from cloud");
       } catch (error) {
+        console.error("Failed to delete from cloud:", error);
         handleFirestoreError(error, OperationType.DELETE, `cvs/${id}`);
       }
     } else {
-      const updatedCvs = cvs.filter(c => c.id !== id);
-      await saveCvsLocally(updatedCvs);
+      showToast("CV deleted locally");
     }
   };
 
@@ -1125,7 +1140,16 @@ export default function App() {
                             <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
                               <FileText className="text-indigo-600 w-7 h-7" />
                             </div>
-                            <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDelete(cv.id)}>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="opacity-0 group-hover:opacity-100 transition-opacity" 
+                              onClick={() => {
+                                if (window.confirm("Are you sure you want to delete this CV? This action cannot be undone.")) {
+                                  handleDelete(cv.id);
+                                }
+                              }}
+                            >
                               <Trash2 className="w-5 h-5 text-rose-500" />
                             </Button>
                           </div>
@@ -1183,7 +1207,16 @@ export default function App() {
                             <div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform">
                               <FileText className="text-indigo-600 w-7 h-7" />
                             </div>
-                            <Button variant="ghost" size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDelete(baseCv.id)}>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="opacity-0 group-hover:opacity-100 transition-opacity" 
+                              onClick={() => {
+                                if (window.confirm("Are you sure you want to delete this CV and all its optimized versions? This action cannot be undone.")) {
+                                  handleDelete(baseCv.id);
+                                }
+                              }}
+                            >
                               <Trash2 className="w-5 h-5 text-rose-500" />
                             </Button>
                           </div>
@@ -1220,7 +1253,16 @@ export default function App() {
                                   <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center">
                                     <Wand2 className="text-emerald-600 w-5 h-5" />
                                   </div>
-                                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDelete(optCv.id)}>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" 
+                                    onClick={() => {
+                                      if (window.confirm("Are you sure you want to delete this optimized CV?")) {
+                                        handleDelete(optCv.id);
+                                      }
+                                    }}
+                                  >
                                     <Trash2 className="w-4 h-4 text-rose-500" />
                                   </Button>
                                 </div>
