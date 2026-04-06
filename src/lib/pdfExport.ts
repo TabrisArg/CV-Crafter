@@ -117,8 +117,10 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       }
 
       contactParts.forEach((part) => {
-        doc.text(part, currentContactX, y);
-        currentContactX += doc.getTextWidth(part) + 6;
+        if (part) {
+          doc.text(part, currentContactX, y);
+          currentContactX += doc.getTextWidth(part) + 6;
+        }
       });
 
       const headerLinks = data.customLinks?.filter(link => link.position === "header" || (!link.position && data.linksPlacement === "header")) || [];
@@ -153,7 +155,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       }
 
       // Experience
-      if (data.experience?.length > 0) {
+      if (data.experience && data.experience.length > 0) {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(10);
         doc.setTextColor(79, 70, 229);
@@ -170,14 +172,14 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
           }
 
           // 1. Company Name & Dates (Standard ATS Pattern)
-          const companyText = exp.company || exp.position;
+          const companyText = exp.company || exp.position || "Experience";
           doc.setFont("helvetica", "bold");
           doc.setFontSize(11);
           doc.setTextColor(15, 23, 42);
           doc.text(companyText, margin, y);
           
           // Right-aligned dates
-          const dates = `${exp.startDate} - ${exp.endDate}`;
+          const dates = `${exp.startDate || ""} - ${exp.endDate || ""}`;
           doc.setFont("helvetica", "normal");
           doc.setFontSize(10);
           const datesWidth = doc.getTextWidth(dates);
@@ -203,12 +205,16 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
             y += 2;
           }
 
-          exp.highlights.forEach((h) => {
-            checkPageBreak(15);
-            // Reasonable indentation for bullet points
-            y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "helvetica", 9.5, [71, 85, 105], "•");
-            y += 2;
-          });
+          if (exp.highlights && Array.isArray(exp.highlights)) {
+            exp.highlights.forEach((h) => {
+              if (h) {
+                checkPageBreak(15);
+                // Reasonable indentation for bullet points
+                y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "helvetica", 9.5, [71, 85, 105], "•");
+                y += 2;
+              }
+            });
+          }
         });
       }
 
@@ -225,28 +231,31 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.text("EDUCATION", margin, eduY);
       eduY += 8;
 
-      data.education?.forEach((edu) => {
-        checkPageBreak(20);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(15, 23, 42);
-        const degreeLines = doc.splitTextToSize(edu.degree, colWidth);
-        doc.text(degreeLines, margin, eduY);
-        eduY += (degreeLines.length * 4);
+      if (data.education && Array.isArray(data.education)) {
+        data.education.forEach((edu) => {
+          if (!edu) return;
+          checkPageBreak(20);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9);
+          doc.setTextColor(15, 23, 42);
+          const degreeLines = doc.splitTextToSize(edu.degree || "Degree", colWidth);
+          doc.text(degreeLines, margin, eduY);
+          eduY += (degreeLines.length * 4);
 
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(51, 65, 85);
-        const schoolLines = doc.splitTextToSize(edu.school, colWidth);
-        doc.text(schoolLines, margin, eduY);
-        eduY += (schoolLines.length * 4);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(51, 65, 85);
+          const schoolLines = doc.splitTextToSize(edu.school || "School", colWidth);
+          doc.text(schoolLines, margin, eduY);
+          eduY += (schoolLines.length * 4);
 
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(148, 163, 184);
-        doc.text(edu.graduationDate, margin, eduY);
-        eduY += 8;
-      });
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          doc.setTextColor(148, 163, 184);
+          doc.text(edu.graduationDate || "", margin, eduY);
+          eduY += 8;
+        });
+      }
 
       // Skills
       let skillY = y;
@@ -261,28 +270,31 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.setTextColor(51, 65, 85);
       
       let currentX = secondColX;
-      data.skills?.forEach((skill) => {
-        const textWidth = doc.getTextWidth(skill);
-        const pillPadding = 2;
-        const pillWidth = textWidth + (pillPadding * 2);
-        const pillHeight = 6;
+      if (data.skills && Array.isArray(data.skills)) {
+        data.skills.forEach((skill) => {
+          if (!skill) return;
+          const textWidth = doc.getTextWidth(skill);
+          const pillPadding = 2;
+          const pillWidth = textWidth + (pillPadding * 2);
+          const pillHeight = 6;
 
-        if (currentX + pillWidth > pageWidth - margin) {
-          currentX = secondColX;
-          skillY += pillHeight + 2;
-          checkPageBreak(pillHeight + 2);
-        }
+          if (currentX + pillWidth > pageWidth - margin) {
+            currentX = secondColX;
+            skillY += pillHeight + 2;
+            checkPageBreak(pillHeight + 2);
+          }
 
-        // Draw Pill Background (Slate-100)
-        doc.setFillColor(241, 245, 249);
-        doc.roundedRect(currentX, skillY - 4, pillWidth, pillHeight, 1, 1, "F");
-        
-        // Draw Skill Text
-        doc.setTextColor(51, 65, 85);
-        doc.text(skill, currentX + pillPadding, skillY);
-        
-        currentX += pillWidth + 2;
-      });
+          // Draw Pill Background (Slate-100)
+          doc.setFillColor(241, 245, 249);
+          doc.roundedRect(currentX, skillY - 4, pillWidth, pillHeight, 1, 1, "F");
+          
+          // Draw Skill Text
+          doc.setTextColor(51, 65, 85);
+          doc.text(skill, currentX + pillPadding, skillY);
+          
+          currentX += pillWidth + 2;
+        });
+      }
 
       // Bottom Links Section for Modern
       const bottomLinks = data.customLinks?.filter(link => link.position === "bottom" || (!link.position && data.linksPlacement === "bottom")) || [];
@@ -381,50 +393,56 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.line(margin, y, pageWidth - margin, y);
       y += 8;
 
-      data.experience?.forEach((exp, index) => {
-        checkPageBreak(35);
-        
-        if (index > 0) {
-          y += 20;
-        }
-
-        // 1. Company & Dates
-        const companyText = exp.company || exp.position;
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.setTextColor(15, 23, 42);
-        doc.text(companyText, margin, y);
-        
-        const dates = `${exp.startDate} - ${exp.endDate}`;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(11);
-        const datesWidth = doc.getTextWidth(dates);
-        doc.text(dates, margin + contentWidth - datesWidth, y);
-        y += 6;
-
-        // 2. Position & Location
-        const positionText = exp.company ? exp.position : "";
-        if (positionText) {
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(11);
-          doc.setTextColor(71, 85, 105);
-          doc.text(positionText.toUpperCase(), margin, y);
+      if (data.experience && Array.isArray(data.experience)) {
+        data.experience.forEach((exp, index) => {
+          checkPageBreak(35);
           
-          if (exp.location) {
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(10);
-            const locWidth = doc.getTextWidth(exp.location);
-            doc.text(exp.location, margin + contentWidth - locWidth, y);
+          if (index > 0) {
+            y += 20;
           }
-          y += 8;
-        }
 
-        exp.highlights.forEach((h) => {
-          checkPageBreak(15);
-          y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "helvetica", 10.5, [71, 85, 105], "•");
-          y += 2;
+          // 1. Company & Dates
+          const companyText = exp.company || exp.position || "Experience";
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(12);
+          doc.setTextColor(15, 23, 42);
+          doc.text(companyText, margin, y);
+          
+          const dates = `${exp.startDate || ""} - ${exp.endDate || ""}`;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(11);
+          const datesWidth = doc.getTextWidth(dates);
+          doc.text(dates, margin + contentWidth - datesWidth, y);
+          y += 6;
+
+          // 2. Position & Location
+          const positionText = exp.company ? exp.position : "";
+          if (positionText) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(11);
+            doc.setTextColor(71, 85, 105);
+            doc.text(positionText.toUpperCase(), margin, y);
+            
+            if (exp.location) {
+              doc.setFont("helvetica", "normal");
+              doc.setFontSize(10);
+              const locWidth = doc.getTextWidth(exp.location);
+              doc.text(exp.location, margin + contentWidth - locWidth, y);
+            }
+            y += 8;
+          }
+
+          if (exp.highlights && Array.isArray(exp.highlights)) {
+            exp.highlights.forEach((h) => {
+              if (h) {
+                checkPageBreak(15);
+                y = renderMarkdownText(h, margin + 6, y, contentWidth - 6, "helvetica", 10.5, [71, 85, 105], "•");
+                y += 2;
+              }
+            });
+          }
         });
-      });
+      }
 
       // Education & Skills
       y += 5;
@@ -440,21 +458,24 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.line(margin, eduY, margin + colWidth - 5, eduY);
       eduY += 8;
 
-      data.education?.forEach((edu) => {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.text(edu.school, margin, eduY);
-        eduY += 4;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(100, 116, 139);
-        doc.text(edu.degree, margin, eduY);
-        eduY += 4;
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(8);
-        doc.text(edu.graduationDate, margin, eduY);
-        eduY += 10;
-      });
+      if (data.education && Array.isArray(data.education)) {
+        data.education.forEach((edu) => {
+          if (!edu) return;
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10);
+          doc.text(edu.school || "School", margin, eduY);
+          eduY += 4;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(100, 116, 139);
+          doc.text(edu.degree || "Degree", margin, eduY);
+          eduY += 4;
+          doc.setFont("helvetica", "italic");
+          doc.setFontSize(8);
+          doc.text(edu.graduationDate || "", margin, eduY);
+          eduY += 10;
+        });
+      }
 
       // Expertise
       let skillY = y;
@@ -469,10 +490,14 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.setTextColor(71, 85, 105);
-      data.skills?.forEach((skill) => {
-        doc.text(skill, margin + colWidth + 5, skillY);
-        skillY += 5;
-      });
+      if (data.skills && Array.isArray(data.skills)) {
+        data.skills.forEach((skill) => {
+          if (skill) {
+            doc.text(skill, margin + colWidth + 5, skillY);
+            skillY += 5;
+          }
+        });
+      }
 
       // Bottom Links Section for Minimal
       const bottomLinks = data.customLinks?.filter(link => link.position === "bottom" || (!link.position && data.linksPlacement === "bottom")) || [];

@@ -441,7 +441,13 @@ export async function optimizeCVForJob(cv: CVData, jobDescription: string, jobUr
     console.log("Optimizing CV for job (gemini-3-flash-preview)...");
     // Increased to 3 attempts to handle transient RPC/XHR errors
     const result = await withRetry(callAI, 3);
-    return result;
+    return {
+      ...result,
+      experience: result.experience || [],
+      education: result.education || [],
+      skills: result.skills || [],
+      personalInfo: result.personalInfo || { fullName: "", email: "", phone: "", location: "" }
+    };
   } catch (error: any) {
     console.error("Error optimizing CV:", error);
     if (error.message?.includes("timed out")) {
@@ -496,7 +502,14 @@ export async function translateCV(cv: CVData, targetLanguage: string): Promise<C
 
   try {
     console.log(`Translating CV to ${targetLanguage}...`);
-    return await withRetry(callAI, 2);
+    const result = await withRetry(callAI, 2);
+    return {
+      ...result,
+      experience: result.experience || [],
+      education: result.education || [],
+      skills: result.skills || [],
+      personalInfo: result.personalInfo || { fullName: "", email: "", phone: "", location: "" }
+    };
   } catch (error: any) {
     console.error("Error translating CV:", error);
     throw new Error(`AI translation to ${targetLanguage} failed.`);
