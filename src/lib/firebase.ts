@@ -21,38 +21,7 @@ export interface AppUser {
   displayName: string | null;
   email: string | null;
   photoURL: string | null;
-  isLocal?: boolean;
 }
-
-const LOCAL_USER_KEY = "cv_crafter_active_user";
-
-export const getLocalUser = (): AppUser | null => {
-  try {
-    const saved = localStorage.getItem(LOCAL_USER_KEY);
-    if (saved) return JSON.parse(saved);
-  } catch (e) {
-    console.error("Error reading local user", e);
-  }
-  return null;
-};
-
-export const saveLocalUser = (name?: string, email?: string): AppUser => {
-  const existing = getLocalUser();
-  const uid = existing?.uid || "local_usr_" + Math.random().toString(36).substring(2, 11);
-  const newUser: AppUser = {
-    uid,
-    displayName: name || existing?.displayName || "Active Member",
-    email: email || existing?.email || "member@cvcrafter.app",
-    photoURL: existing?.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-    isLocal: true
-  };
-  localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(newUser));
-  return newUser;
-};
-
-export const clearLocalUser = () => {
-  localStorage.removeItem(LOCAL_USER_KEY);
-};
 
 // Initialize Firebase SDK
 console.log("[DEBUG] Initializing Firebase with Project ID:", firebaseConfig.projectId);
@@ -76,7 +45,7 @@ export const ensureUserProfile = async (user: FirebaseUser) => {
     await setDoc(doc(db, 'users', user.uid), {
       id: user.uid,
       email: user.email || `${user.uid}@placeholder.com`,
-      name: user.displayName || user.email?.split('@')[0] || 'Member User',
+      name: user.displayName || user.email?.split('@')[0] || 'User',
       picture: user.photoURL || ''
     }, { merge: true });
   } catch (error) {
@@ -84,27 +53,19 @@ export const ensureUserProfile = async (user: FirebaseUser) => {
   }
 };
 
-// Auth functions - hybrid approach guarantees 100% login success
+// Auth functions - standard Google Auth via popup
 export const loginWithGoogle = async (): Promise<AppUser> => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    if (result?.user) {
-      await ensureUserProfile(result.user);
-      return {
-        uid: result.user.uid,
-        displayName: result.user.displayName,
-        email: result.user.email,
-        photoURL: result.user.photoURL,
-        isLocal: false
-      };
-    }
-  } catch (error: any) {
-    console.info("Firebase Google Auth notice (using seamless active user session):", error?.code || error?.message);
+  const result = await signInWithPopup(auth, googleProvider);
+  if (result?.user) {
+    await ensureUserProfile(result.user);
+    return {
+      uid: result.user.uid,
+      displayName: result.user.displayName,
+      email: result.user.email,
+      photoURL: result.user.photoURL,
+    };
   }
-
-  // Fallback to active local member session
-  const fallbackUser = saveLocalUser();
-  return fallbackUser;
+  throw new Error("No user returned from Google sign-in.");
 };
 
 export const handleAuthRedirectResult = async (): Promise<AppUser | null> => {
@@ -117,7 +78,6 @@ export const handleAuthRedirectResult = async (): Promise<AppUser | null> => {
         displayName: result.user.displayName,
         email: result.user.email,
         photoURL: result.user.photoURL,
-        isLocal: false
       };
     }
   } catch (error) {
@@ -127,7 +87,6 @@ export const handleAuthRedirectResult = async (): Promise<AppUser | null> => {
 };
 
 export const logout = async () => {
-  clearLocalUser();
   try {
     await signOut(auth);
   } catch (error) {

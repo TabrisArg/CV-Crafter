@@ -37,7 +37,7 @@ import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
-import { auth, db, loginWithGoogle, logout, handleAuthRedirectResult, getLocalUser, saveLocalUser, type AppUser, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
+import { auth, db, loginWithGoogle, logout, handleAuthRedirectResult, type AppUser, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, collection, query, where, onSnapshot, deleteDoc } from "firebase/firestore";
 
@@ -620,22 +620,15 @@ export default function App() {
       if (fbUser) {
         setUser({
           uid: fbUser.uid,
-          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || "Active Member",
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || "User",
           email: fbUser.email,
-          photoURL: fbUser.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-          isLocal: false
+          photoURL: fbUser.photoURL || "",
         });
       } else {
-        const local = getLocalUser();
-        setUser(local);
+        setUser(null);
       }
       setIsAuthReady(true);
     });
-
-    const local = getLocalUser();
-    if (local && !user) {
-      setUser(local);
-    }
 
     return () => unsubscribe();
   }, []);
@@ -658,9 +651,9 @@ export default function App() {
           }
         }
 
-        if (user && !user.isLocal) {
+        if (user) {
           try {
-            // Then sync with Firestore if logged in with Cloud Firebase
+            // Then sync with Firestore if logged in with Google
             const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
             unsubscribe = onSnapshot(q, (snapshot) => {
               const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
@@ -697,7 +690,7 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isAuthReady, user?.uid, user?.isLocal]);
+  }, [isAuthReady, user?.uid]);
 
   const saveCvsLocally = async (updatedCvs: CV[]) => {
     localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
@@ -705,7 +698,7 @@ export default function App() {
   };
 
   const saveCvToFirestore = async (cv: CV) => {
-    if (user && !user.isLocal) {
+    if (user) {
       const cvToSave = { ...cv, userId: user.uid };
       try {
         await setDoc(doc(db, "cvs", cv.id), cvToSave);
@@ -722,11 +715,21 @@ export default function App() {
     try {
       const loggedUser = await loginWithGoogle();
       setUser(loggedUser);
-      showToast(`Welcome, ${loggedUser.displayName || 'Member'}!`);
+      showToast(`Welcome, ${loggedUser.displayName || 'User'}!`);
     } catch (err: any) {
-      const fallbackUser = saveLocalUser();
-      setUser(fallbackUser);
-      showToast("Signed in as Active Member");
+      console.error("[Auth] Google Login Error:", err);
+      setUser(null);
+      if (err?.code === "auth/unauthorized-domain" || (err?.message && err.message.includes("unauthorized-domain"))) {
+        setShowDomainModal(true);
+        showToast("Domain requires authorization in Firebase Console", "error");
+      } else if (err?.code === "auth/popup-blocked") {
+        setShowDomainModal(true);
+        showToast("Login popup was blocked by browser", "error");
+      } else if (err?.code === "auth/popup-closed-by-user") {
+        showToast("Sign-in popup was closed", "error");
+      } else {
+        showToast(err?.message || "Google sign-in failed", "error");
+      }
     }
   };
 
