@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { ATSScanner } from "./components/ATSScanner";
 import { UnauthorizedDomainModal } from "./components/UnauthorizedDomainModal";
+import { AuthModal } from "./components/AuthModal";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill } from "./lib/gemini";
@@ -506,6 +507,7 @@ export default function App() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showDomainModal, setShowDomainModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isTranslating, setIsTranslating] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
@@ -1451,10 +1453,10 @@ export default function App() {
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    onClick={handleLogin} 
+                    onClick={() => setShowAuthModal(true)} 
                     className="rounded-xl px-4 text-xs font-bold border-indigo-200 text-indigo-700 hover:bg-indigo-50 shadow-2xs"
                   >
-                    Google Login
+                    Sign In / Register
                   </Button>
                 </div>
               )}
@@ -2627,6 +2629,13 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        showToast={showToast}
+        onSuccess={(loggedUser) => setUser(loggedUser)}
+      />
 
       <UnauthorizedDomainModal
         isOpen={showDomainModal}

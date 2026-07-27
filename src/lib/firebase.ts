@@ -8,6 +8,8 @@ import {
   signOut, 
   onAuthStateChanged,
   signInAnonymously,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   updateProfile,
   User as FirebaseUser 
 } from 'firebase/auth';
@@ -53,7 +55,38 @@ export const ensureUserProfile = async (user: FirebaseUser) => {
   }
 };
 
-// Auth functions - standard Google Auth via popup
+// Auth functions - Email & Password + Google Auth via popup
+export const signUpWithEmail = async (email: string, pass: string, name?: string): Promise<AppUser> => {
+  const result = await createUserWithEmailAndPassword(auth, email, pass);
+  if (result?.user) {
+    if (name) {
+      await updateProfile(result.user, { displayName: name });
+    }
+    await ensureUserProfile(result.user);
+    return {
+      uid: result.user.uid,
+      displayName: name || result.user.displayName || result.user.email?.split('@')[0] || 'User',
+      email: result.user.email,
+      photoURL: result.user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || email)}`,
+    };
+  }
+  throw new Error("Failed to create account.");
+};
+
+export const signInWithEmail = async (email: string, pass: string): Promise<AppUser> => {
+  const result = await signInWithEmailAndPassword(auth, email, pass);
+  if (result?.user) {
+    await ensureUserProfile(result.user);
+    return {
+      uid: result.user.uid,
+      displayName: result.user.displayName || result.user.email?.split('@')[0] || 'User',
+      email: result.user.email,
+      photoURL: result.user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(result.user.displayName || email)}`,
+    };
+  }
+  throw new Error("Failed to sign in.");
+};
+
 export const loginWithGoogle = async (): Promise<AppUser> => {
   const result = await signInWithPopup(auth, googleProvider);
   if (result?.user) {
