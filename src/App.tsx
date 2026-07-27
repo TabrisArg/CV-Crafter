@@ -36,7 +36,7 @@ import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
-import { auth, db, loginWithGoogle, logout, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
+import { auth, db, loginWithGoogle, logout, handleAuthRedirectResult, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, collection, query, where, onSnapshot, deleteDoc } from "firebase/firestore";
 
@@ -608,6 +608,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    handleAuthRedirectResult().catch((err) => console.error("Auth redirect check failed:", err));
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setIsAuthReady(true);
@@ -700,8 +702,22 @@ export default function App() {
     try {
       await loginWithGoogle();
       showToast("Logged in successfully!");
-    } catch (err) {
-      showToast("Failed to login", "error");
+    } catch (err: any) {
+      console.error("[Auth] Google Login Error:", err);
+      let userFriendlyMsg = "Failed to login with Google.";
+      if (err?.code === "auth/popup-blocked") {
+        userFriendlyMsg = "Login popup was blocked by your browser. Please allow popups or open the app in a new browser window/tab.";
+      } else if (err?.code === "auth/popup-closed-by-user") {
+        userFriendlyMsg = "Sign-in popup was closed before completing.";
+      } else if (err?.code === "auth/unauthorized-domain") {
+        userFriendlyMsg = "This domain is not authorized in Firebase Console settings.";
+      } else if (err?.code === "auth/operation-not-allowed") {
+        userFriendlyMsg = "Google Sign-In is disabled in Firebase Authentication console.";
+      } else if (err?.message) {
+        userFriendlyMsg = `Login error: ${err.message}`;
+      }
+      setError(userFriendlyMsg);
+      showToast(userFriendlyMsg, "error");
     }
   };
 
@@ -1113,8 +1129,14 @@ export default function App() {
     return (
       <ATSScanner
         cvs={cvs}
-        onBack={() => setView("dashboard")}
-        onOpenInEditor={handleOpenInEditor}
+        currentCv={currentCv}
+        onBack={() => setView(currentCv ? "editor" : "dashboard")}
+        onOpenInEditor={(cvContent, title) => {
+          if (currentCv) {
+            setCurrentCv({ ...currentCv, content: cvContent, title: title || currentCv.title });
+          }
+          setView("editor");
+        }}
         showToast={showToast}
       />
     );

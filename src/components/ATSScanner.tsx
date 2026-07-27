@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   FileUp, 
@@ -9,7 +9,6 @@ import {
   Copy, 
   FileText, 
   Scan, 
-  Search, 
   ArrowLeft, 
   Check, 
   ShieldCheck, 
@@ -18,9 +17,8 @@ import {
   Tag, 
   Wrench, 
   Layers, 
-  ChevronRight,
-  ExternalLink,
-  Edit3
+  RefreshCw,
+  Zap
 } from "lucide-react";
 import mammoth from "mammoth";
 import { 
@@ -41,6 +39,7 @@ interface CV {
 
 interface ATSScannerProps {
   cvs: CV[];
+  currentCv?: CV | null;
   onBack: () => void;
   onOpenInEditor?: (cvContent: CVData, title?: string) => void;
   showToast: (message: string, type?: "success" | "error") => void;
@@ -55,11 +54,13 @@ const SCAN_STEPS = [
   "Calculating ATS readability & compatibility score..."
 ];
 
-export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScannerProps) {
-  const [activeInputTab, setActiveInputTab] = useState<"upload" | "library" | "text">("upload");
+export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }: ATSScannerProps) {
+  // Available input tabs: "active" (if active CV), "library" (saved CVs), "upload" (file)
+  const initialTab = currentCv ? "active" : cvs.length > 0 ? "library" : "upload";
+  const [activeInputTab, setActiveInputTab] = useState<"active" | "library" | "upload">(initialTab);
+  
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [pastedText, setPastedText] = useState("");
-  const [selectedCvId, setSelectedCvId] = useState<string>(cvs[0]?.id || "");
+  const [selectedCvId, setSelectedCvId] = useState<string>(currentCv?.id || cvs[0]?.id || "");
   const [isScanning, setIsScanning] = useState(false);
   const [scanStepIndex, setScanStepIndex] = useState(0);
   const [scanResult, setScanResult] = useState<ATSScanResult | null>(null);
@@ -68,19 +69,32 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleRunScan = async () => {
+  const handleRunScan = async (targetCvContent?: CVData) => {
     setIsScanning(true);
     setScanResult(null);
     setScanStepIndex(0);
 
     const stepInterval = setInterval(() => {
       setScanStepIndex((prev) => (prev < SCAN_STEPS.length - 1 ? prev + 1 : prev));
-    }, 2500);
+    }, 2200);
 
     try {
       let result: ATSScanResult;
 
-      if (activeInputTab === "upload") {
+      if (targetCvContent) {
+        result = await scanCVForATSFromCVData(targetCvContent);
+      } else if (activeInputTab === "active" && currentCv) {
+        result = await scanCVForATSFromCVData(currentCv.content);
+      } else if (activeInputTab === "library") {
+        const targetCv = cvs.find((c) => c.id === selectedCvId) || currentCv;
+        if (!targetCv) {
+          showToast("Please select a CV from your library to scan.", "error");
+          setIsScanning(false);
+          clearInterval(stepInterval);
+          return;
+        }
+        result = await scanCVForATSFromCVData(targetCv.content);
+      } else if (activeInputTab === "upload") {
         if (!uploadedFile) {
           showToast("Please select a file to scan.", "error");
           setIsScanning(false);
@@ -97,7 +111,7 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
           const extracted = await mammoth.extractRawText({ arrayBuffer });
           result = await scanCVForATSFromText(extracted.value);
         } else {
-          // Multimodal PDF / PNG / JPG / PSD
+          // Multimodal PDF / PNG / JPG
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
@@ -117,27 +131,12 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
             }
           ]);
         }
-      } else if (activeInputTab === "library") {
-        const targetCv = cvs.find((c) => c.id === selectedCvId);
-        if (!targetCv) {
-          showToast("Please select a valid CV from your library.", "error");
-          setIsScanning(false);
-          clearInterval(stepInterval);
-          return;
-        }
-        result = await scanCVForATSFromCVData(targetCv.content);
       } else {
-        if (!pastedText.trim()) {
-          showToast("Please paste CV text to scan.", "error");
-          setIsScanning(false);
-          clearInterval(stepInterval);
-          return;
-        }
-        result = await scanCVForATSFromText(pastedText);
+        throw new Error("No CV or file selected for scanning.");
       }
 
       setScanResult(result);
-      showToast("ATS CV Scan complete!");
+      showToast("ATS CV Scan completed successfully!");
     } catch (err: any) {
       console.error("ATS Scan Error:", err);
       showToast(err.message || "Failed to scan CV. Please try again.", "error");
@@ -146,6 +145,13 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
       setIsScanning(false);
     }
   };
+
+  // Auto run scan on mount if active CV exists and hasn't been scanned yet
+  useEffect(() => {
+    if (currentCv && !scanResult && !isScanning) {
+      handleRunScan(currentCv.content);
+    }
+  }, []);
 
   const copyRawText = () => {
     if (!scanResult) return;
@@ -173,6 +179,8 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
     if (severity === "warning") return <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />;
     return <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />;
   };
+
+  const activeCvTitle = currentCv?.title || "Active Resume";
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
@@ -205,31 +213,45 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
 
       <main className="max-w-7xl mx-auto px-6 pt-8">
         {/* Header Hero */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-2 flex items-center gap-3">
-            How ATS Parsers Read Your CV
-          </h1>
-          <p className="text-slate-600 max-w-3xl text-sm leading-relaxed">
-            Applicant Tracking Systems (ATS / ATO) use automated text extraction engines that strip away layouts, columns, and graphics.
-            Scan your resume to view the exact plain-text stream, parsed entities, and formatting audit generated for recruiters.
-          </p>
+        <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mb-1 flex items-center gap-3">
+              Automated ATS Resume Audit
+            </h1>
+            <p className="text-slate-600 max-w-2xl text-sm">
+              See how enterprise ATS engines parse, index, and score your CV. Detect unreadable text layers, non-standard section titles, and missing keyword tags.
+            </p>
+          </div>
+
+          {currentCv && (
+            <button
+              onClick={() => handleRunScan(currentCv.content)}
+              disabled={isScanning}
+              className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs tracking-wide shadow-md shadow-indigo-200 transition-all flex items-center gap-2 shrink-0 self-start md:self-auto"
+            >
+              <RefreshCw className={`w-4 h-4 ${isScanning ? "animate-spin" : ""}`} />
+              <span>Re-Scan Active CV</span>
+            </button>
+          )}
         </div>
 
         {/* Input Selector Card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-8">
-          {/* Input Method Tabs */}
-          <div className="flex items-center gap-2 border-b border-slate-200 pb-4 mb-6">
-            <button
-              onClick={() => setActiveInputTab("upload")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                activeInputTab === "upload"
-                  ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              <FileUp className="w-4 h-4" />
-              Upload CV Document
-            </button>
+          {/* Source Select Tabs */}
+          <div className="flex items-center gap-2 border-b border-slate-200 pb-4 mb-6 overflow-x-auto">
+            {currentCv && (
+              <button
+                onClick={() => setActiveInputTab("active")}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                  activeInputTab === "active"
+                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                <Zap className="w-4 h-4 text-amber-300" />
+                Active CV ({activeCvTitle})
+              </button>
+            )}
 
             {cvs.length > 0 && (
               <button
@@ -241,24 +263,97 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                 }`}
               >
                 <FileText className="w-4 h-4" />
-                Select from Saved CVs ({cvs.length})
+                Select Saved CV ({cvs.length})
               </button>
             )}
 
             <button
-              onClick={() => setActiveInputTab("text")}
+              onClick={() => setActiveInputTab("upload")}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-                activeInputTab === "text"
+                activeInputTab === "upload"
                   ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
-              <Edit3 className="w-4 h-4" />
-              Paste Raw Resume Text
+              <FileUp className="w-4 h-4" />
+              Upload CV Document (PDF / DOCX)
             </button>
           </div>
 
-          {/* Tab Content */}
+          {/* Active Tab Details */}
+          {activeInputTab === "active" && currentCv && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-indigo-50/60 border border-indigo-200 rounded-xl gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-slate-900">{currentCv.title || "Untitled CV"}</h4>
+                  <p className="text-xs text-slate-500">
+                    Candidate: <span className="font-semibold">{currentCv.content?.personalInfo?.fullName || "Not specified"}</span> • {currentCv.content?.experience?.length || 0} Experience Entries
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleRunScan(currentCv.content)}
+                disabled={isScanning}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs tracking-wide shadow-md shadow-indigo-200 transition-all flex items-center gap-2 shrink-0"
+              >
+                <Scan className="w-4 h-4" />
+                <span>Scan This CV</span>
+              </button>
+            </div>
+          )}
+
+          {activeInputTab === "library" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {cvs.map((cv) => {
+                  const isSelected = selectedCvId === cv.id;
+                  return (
+                    <div
+                      key={cv.id}
+                      onClick={() => setSelectedCvId(cv.id)}
+                      className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between gap-3 ${
+                        isSelected
+                          ? "border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-200"
+                          : "border-slate-200 bg-white hover:border-slate-300"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4 text-slate-600" />
+                        </div>
+                        {isSelected && <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{cv.title || "Untitled CV"}</h4>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {cv.content?.personalInfo?.fullName || "No Name"} • {cv.content?.experience?.length || 0} Roles
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={() => {
+                    const targetCv = cvs.find((c) => c.id === selectedCvId);
+                    if (targetCv) handleRunScan(targetCv.content);
+                  }}
+                  disabled={isScanning || !selectedCvId}
+                  className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-indigo-200 transition-all flex items-center gap-2"
+                >
+                  <Scan className="w-4 h-4" />
+                  <span>Scan Selected CV</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {activeInputTab === "upload" && (
             <div>
               <input
@@ -280,8 +375,8 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                     <FileUp className="w-6 h-6" />
                   </div>
                   <div className="text-center">
-                    <p className="text-sm font-bold text-slate-800">Click to upload your CV file</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Supports PDF, DOCX, DOC, TXT, PNG, JPG (max 15MB)</p>
+                    <p className="text-sm font-bold text-slate-800">Click to upload your resume document</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Supports PDF, DOCX, DOC, TXT, PNG, JPG</p>
                   </div>
                 </div>
               ) : (
@@ -295,86 +390,26 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                       <p className="text-xs text-slate-500">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setUploadedFile(null)}
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-800 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 transition-colors"
-                  >
-                    Change File
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setUploadedFile(null)}
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 transition-colors"
+                    >
+                      Remove
+                    </button>
+                    <button
+                      onClick={() => handleRunScan()}
+                      disabled={isScanning}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-200 transition-all flex items-center gap-2"
+                    >
+                      <Scan className="w-4 h-4" />
+                      <span>Scan File</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           )}
-
-          {activeInputTab === "library" && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {cvs.map((cv) => {
-                const isSelected = selectedCvId === cv.id;
-                return (
-                  <div
-                    key={cv.id}
-                    onClick={() => setSelectedCvId(cv.id)}
-                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between gap-3 ${
-                      isSelected
-                        ? "border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-200"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                        <FileText className="w-4 h-4 text-slate-600" />
-                      </div>
-                      {isSelected && <CheckCircle2 className="w-5 h-5 text-indigo-600 shrink-0" />}
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{cv.title || "Untitled CV"}</h4>
-                      <p className="text-xs text-slate-500 mt-1">
-                        {cv.content?.personalInfo?.fullName || "No Name"} • {cv.content?.experience?.length || 0} Roles
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {activeInputTab === "text" && (
-            <div>
-              <textarea
-                value={pastedText}
-                onChange={(e) => setPastedText(e.target.value)}
-                placeholder="Paste the full plain text of your resume here..."
-                rows={7}
-                className="w-full p-4 rounded-xl border border-slate-200 text-xs font-mono bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          )}
-
-          {/* Run Scan Action Button */}
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={handleRunScan}
-              disabled={
-                isScanning ||
-                (activeInputTab === "upload" && !uploadedFile) ||
-                (activeInputTab === "library" && !selectedCvId) ||
-                (activeInputTab === "text" && !pastedText.trim())
-              }
-              className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs tracking-wide shadow-lg shadow-indigo-200 transition-all flex items-center gap-2"
-            >
-              {isScanning ? (
-                <>
-                  <Sparkles className="w-4 h-4 animate-spin" />
-                  <span>Scanning with ATS Engine...</span>
-                </>
-              ) : (
-                <>
-                  <Scan className="w-4 h-4" />
-                  <span>Scan CV Like ATS</span>
-                </>
-              )}
-            </button>
-          </div>
         </div>
 
         {/* Loading Progress State */}
@@ -383,7 +418,7 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
             <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mx-auto mb-4 text-indigo-600">
               <Cpu className="w-8 h-8 animate-pulse" />
             </div>
-            <h3 className="font-bold text-lg text-slate-900 mb-2">Simulating ATS Document Parser</h3>
+            <h3 className="font-bold text-lg text-slate-900 mb-2">Simulating Enterprise ATS Parser</h3>
             <p className="text-xs font-medium text-indigo-600 mb-6 bg-indigo-50 py-2 px-4 rounded-full inline-block border border-indigo-100">
               {SCAN_STEPS[scanStepIndex]}
             </p>
@@ -424,17 +459,16 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                   </div>
                   <p className="text-xs text-slate-500 max-w-xl">
                     {scanResult.overallScore >= 80
-                      ? "Your CV is well-structured and cleanly parsed by ATS indexers. Key sections and contact data were successfully identified."
-                      : "Your CV contains formatting or structural friction that may prevent enterprise ATS engines from cleanly indexing your data."}
+                      ? "Your CV is cleanly parsed by ATS indexers. Standard section headers and contact entities were successfully identified."
+                      : "Your CV contains formatting or structural issues that may prevent enterprise ATS engines from indexing your data."}
                   </p>
                 </div>
               </div>
 
-              {onOpenInEditor && activeInputTab === "library" && selectedCvId && (
+              {onOpenInEditor && currentCv && (
                 <button
                   onClick={() => {
-                    const cv = cvs.find((c) => c.id === selectedCvId);
-                    if (cv) onOpenInEditor(cv.content, cv.title);
+                    if (currentCv) onOpenInEditor(currentCv.content, currentCv.title);
                   }}
                   className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold transition-all flex items-center gap-2 shrink-0"
                 >
@@ -444,7 +478,7 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
               )}
             </div>
 
-            {/* Score Breakdown Bar Cards */}
+            {/* Category Score Breakdown */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Contact Details</span>
@@ -487,7 +521,7 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
               </div>
 
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Date Format Checks</span>
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">Date Consistency</span>
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-lg font-bold text-slate-900">{scanResult.scoreBreakdown.dateConsistency.score}%</span>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getBadgeColor(scanResult.scoreBreakdown.dateConsistency.status)}`}>
@@ -557,14 +591,13 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                   }`}
                 >
                   <Tag className="w-4 h-4" />
-                  Indexed Skills & Keywords ({scanResult.extractedKeywords.length})
+                  Indexed Skills ({scanResult.extractedKeywords.length})
                 </button>
               </div>
 
               {/* Tab 1: Issues & Recommendations */}
               {activeResultTab === "overview" && (
                 <div className="p-6 space-y-6">
-                  {/* Quick Fixes Banner */}
                   {scanResult.quickFixes && scanResult.quickFixes.length > 0 && (
                     <div className="bg-indigo-50/60 border border-indigo-200 rounded-xl p-5">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-900 mb-3 flex items-center gap-2">
@@ -584,7 +617,6 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                     </div>
                   )}
 
-                  {/* Detailed Issues List */}
                   <div>
                     <h3 className="text-sm font-bold text-slate-900 mb-4">Detailed ATS Audit Log</h3>
                     <div className="space-y-3">
@@ -629,7 +661,7 @@ export function ATSScanner({ cvs, onBack, onOpenInEditor, showToast }: ATSScanne
                     <div>
                       <h3 className="text-sm font-bold text-slate-900">Unformatted Plain Text Stream</h3>
                       <p className="text-xs text-slate-500">
-                        This is the raw linear string of text an ATS parser stores in its database after stripping all formatting, icons, and visual columns.
+                        This is the raw string of text an ATS parser stores in its database after stripping all visual formatting.
                       </p>
                     </div>
                     <button

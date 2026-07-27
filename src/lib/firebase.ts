@@ -1,5 +1,14 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  signOut, 
+  onAuthStateChanged, 
+  User as FirebaseUser 
+} from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, collection, query, where, onSnapshot, deleteDoc, getDocFromServer } from 'firebase/firestore';
 
 // Import the Firebase configuration
@@ -20,31 +29,62 @@ console.log("[DEBUG] Using Firestore Database ID:", dbId || "(default)");
 export const db = dbId ? getFirestore(app, dbId) : getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
+
+export const ensureUserProfile = async (user: FirebaseUser) => {
+  if (!user) return;
+  try {
+    await setDoc(doc(db, 'users', user.uid), {
+      id: user.uid,
+      email: user.email || `${user.uid}@placeholder.com`,
+      name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
+      picture: user.photoURL || ''
+    }, { merge: true });
+  } catch (error) {
+    console.warn("User authenticated, but failed to write profile doc to Firestore:", error);
+  }
+};
 
 // Auth functions
 export const loginWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
+    if (result?.user) {
+      await ensureUserProfile(result.user);
+      return result.user;
+    }
+  } catch (error: any) {
+    console.warn('signInWithPopup failed/blocked:', error?.code, error?.message);
     
-    // Save user profile to Firestore
-    const userPath = `users/${user.uid}`;
-    try {
-      await setDoc(doc(db, 'users', user.uid), {
-        id: user.uid,
-        email: user.email || '',
-        name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
-        picture: user.photoURL || ''
-      }, { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, userPath);
+    // Check if error is due to popup blocking, iframe policy, or popup closure
+    if (
+      error?.code === 'auth/popup-blocked' ||
+      error?.code === 'auth/popup-closed-by-user' ||
+      error?.code === 'auth/cancelled-popup-request' ||
+      (error?.message && error.message.toLowerCase().includes('popup'))
+    ) {
+      console.log('Attempting fallback to signInWithRedirect...');
+      await signInWithRedirect(auth, googleProvider);
+      return null;
     }
     
-    return user;
-  } catch (error) {
-    console.error('Error logging in with Google:', error);
     throw error;
   }
+};
+
+export const handleAuthRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth);
+    if (result?.user) {
+      await ensureUserProfile(result.user);
+      return result.user;
+    }
+  } catch (error) {
+    console.error('Error handling redirect result:', error);
+  }
+  return null;
 };
 
 export const logout = async () => {
