@@ -100,9 +100,15 @@ export function UnauthorizedDomainModal({
                   </a>
                 </li>
                 <li>Go to <strong>Authentication</strong> &rarr; <strong>Settings</strong> &rarr; <strong>Authorized domains</strong>.</li>
-                <li>Click <strong>Add domain</strong> and paste <code>{currentDomain}</code>.</li>
-                <li>Click <strong>Save</strong> and refresh this page to sign in!</li>
+                <li>
+                  Click <strong>Add domain</strong> and paste exactly: <code className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold">{currentDomain}</code>
+                </li>
+                <li>Click <strong>Save</strong> and wait ~1 minute for propagation, then refresh.</li>
               </ol>
+
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
+                <strong>⚠️ Crucial Requirement:</strong> Do <u>NOT</u> include <code>https://</code> or trailing slashes (<code>/</code>). Firebase expects only the bare hostname (e.g. <code>cv-crafter3000.netlify.app</code>).
+              </div>
             </div>
 
             {/* Guest fallback banner */}
