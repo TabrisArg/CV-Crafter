@@ -28,6 +28,7 @@ import {
   Scan
 } from "lucide-react";
 import { ATSScanner } from "./components/ATSScanner";
+import { UnauthorizedDomainModal } from "./components/UnauthorizedDomainModal";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill } from "./lib/gemini";
@@ -504,6 +505,7 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showDomainModal, setShowDomainModal] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isTranslating, setIsTranslating] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
@@ -705,12 +707,14 @@ export default function App() {
     } catch (err: any) {
       console.error("[Auth] Google Login Error:", err);
       let userFriendlyMsg = "Failed to login with Google.";
-      if (err?.code === "auth/popup-blocked") {
-        userFriendlyMsg = "Login popup was blocked by your browser. Please allow popups or open the app in a new browser window/tab.";
+      if (err?.code === "auth/unauthorized-domain") {
+        setShowDomainModal(true);
+        userFriendlyMsg = "This domain requires authorization in Firebase Console settings.";
+      } else if (err?.code === "auth/popup-blocked") {
+        setShowDomainModal(true);
+        userFriendlyMsg = "Login popup was blocked by your browser. Open the app in a standalone tab or authorize the domain.";
       } else if (err?.code === "auth/popup-closed-by-user") {
         userFriendlyMsg = "Sign-in popup was closed before completing.";
-      } else if (err?.code === "auth/unauthorized-domain") {
-        userFriendlyMsg = "This domain is not authorized in Firebase Console settings.";
       } else if (err?.code === "auth/operation-not-allowed") {
         userFriendlyMsg = "Google Sign-In is disabled in Firebase Authentication console.";
       } else if (err?.message) {
@@ -2524,6 +2528,16 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <UnauthorizedDomainModal
+        isOpen={showDomainModal}
+        onClose={() => setShowDomainModal(false)}
+        onContinueGuest={() => {
+          setShowDomainModal(false);
+          showToast("Continuing in Guest Mode using local storage persistence.");
+        }}
+        showToast={showToast}
+      />
     </div>
   );
 }
