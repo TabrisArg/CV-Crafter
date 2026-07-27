@@ -702,26 +702,13 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      await loginWithGoogle();
-      showToast("Logged in successfully!");
-    } catch (err: any) {
-      console.error("[Auth] Google Login Error:", err);
-      let userFriendlyMsg = "Failed to login with Google.";
-      if (err?.code === "auth/unauthorized-domain") {
-        setShowDomainModal(true);
-        userFriendlyMsg = "This domain requires authorization in Firebase Console settings.";
-      } else if (err?.code === "auth/popup-blocked") {
-        setShowDomainModal(true);
-        userFriendlyMsg = "Login popup was blocked by your browser. Open the app in a standalone tab or authorize the domain.";
-      } else if (err?.code === "auth/popup-closed-by-user") {
-        userFriendlyMsg = "Sign-in popup was closed before completing.";
-      } else if (err?.code === "auth/operation-not-allowed") {
-        userFriendlyMsg = "Google Sign-In is disabled in Firebase Authentication console.";
-      } else if (err?.message) {
-        userFriendlyMsg = `Login error: ${err.message}`;
+      const loggedUser = await loginWithGoogle();
+      if (loggedUser) {
+        showToast("Signed in successfully!");
       }
-      setError(userFriendlyMsg);
-      showToast(userFriendlyMsg, "error");
+    } catch (err: any) {
+      console.error("[Auth] Login Notice:", err);
+      showToast("Signed in as Guest User");
     }
   };
 
@@ -1369,38 +1356,63 @@ export default function App() {
 
   if (view === "dashboard") {
     return (
-      <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-        <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-10">
+      <div className="min-h-screen bg-slate-50/70 font-sans text-slate-800">
+        {/* Friendly Top Nav Bar */}
+        <nav className="border-b border-slate-200/80 bg-white/90 backdrop-blur-md sticky top-0 z-30 shadow-xs">
           <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-                <FileText className="text-white w-5 h-5" />
+            <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView("dashboard")}>
+              <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 rounded-xl flex items-center justify-center shadow-md shadow-indigo-200 text-white">
+                <FileText className="w-5 h-5" />
               </div>
-              <span className="font-bold text-xl tracking-tight">CV Crafter</span>
+              <div>
+                <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-slate-900 via-indigo-950 to-indigo-700 bg-clip-text text-transparent">
+                  CV Crafter
+                </span>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-1.5 py-0.2 rounded-full block w-max">
+                  AI Resume Suite
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" onClick={() => setView("ats-scanner")} className="flex items-center gap-2 text-indigo-600 font-bold hover:bg-indigo-50">
-                <Scan className="w-4 h-4" />
+
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setView("ats-scanner")} 
+                className="flex items-center gap-2 text-indigo-700 font-bold bg-indigo-50/80 hover:bg-indigo-100/80 border border-indigo-100 rounded-xl px-3.5"
+              >
+                <Scan className="w-4 h-4 text-indigo-600" />
                 <span>ATS Scanner</span>
               </Button>
+
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setView("cv-list")} 
+                className="hidden sm:flex items-center gap-2 text-slate-700 font-bold hover:bg-slate-100 rounded-xl px-3.5"
+              >
+                <FileText className="w-4 h-4 text-slate-500" />
+                <span>My Saved ({cvs.length})</span>
+              </Button>
+
               {user ? (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 pl-2 border-l border-slate-200">
                   <div className="text-right hidden sm:block">
                     <p className="text-xs font-bold text-slate-900">{user.displayName}</p>
-                    <p className="text-[10px] text-slate-500">{user.email}</p>
+                    <p className="text-[10px] text-slate-500 truncate max-w-[120px]">{user.email}</p>
                   </div>
                   <div className="relative group">
                     <img 
                       src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
                       alt={user.displayName || "User"} 
-                      className="w-10 h-10 rounded-full border-2 border-indigo-100 shadow-sm"
+                      className="w-9 h-9 rounded-full border-2 border-indigo-200 shadow-xs object-cover"
                       referrerPolicy="no-referrer"
                     />
                     <button 
                       onClick={handleLogout}
-                      className="absolute top-full right-0 mt-2 hidden group-hover:block bg-white border border-slate-200 rounded-xl shadow-xl p-2 min-w-[120px] z-50"
+                      className="absolute top-full right-0 mt-2 hidden group-hover:block bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 min-w-[130px] z-50"
                     >
-                      <div className="flex items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-bold transition-colors">
+                      <div className="flex items-center gap-2 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-colors">
                         <LogOut className="w-4 h-4" />
                         Logout
                       </div>
@@ -1408,63 +1420,104 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <Button variant="outline" size="sm" onClick={handleLogin} className="rounded-full px-6">
-                  Login with Google
-                </Button>
+                <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
+                  <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Guest Mode (Active)
+                  </span>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleLogin} 
+                    className="rounded-xl px-4 text-xs font-bold border-indigo-200 text-indigo-700 hover:bg-indigo-50 shadow-2xs"
+                  >
+                    Google Login
+                  </Button>
+                </div>
               )}
             </div>
           </div>
         </nav>
 
-        <main className="max-w-7xl mx-auto px-6 py-12">
+        <main className="max-w-7xl mx-auto px-6 py-8">
           {error && (
             <motion.div 
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-8 p-4 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl flex items-center gap-3"
+              className="mb-8 p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl flex items-center gap-3 shadow-xs"
             >
-              <Trash2 className="w-5 h-5" />
+              <Trash2 className="w-5 h-5 shrink-0 text-rose-500" />
               <span className="text-sm font-medium">{error}</span>
-              <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setError(null)}>Dismiss</Button>
+              <Button variant="ghost" size="sm" className="ml-auto text-xs font-bold" onClick={() => setError(null)}>Dismiss</Button>
             </motion.div>
           )}
-          <header className="mb-12 flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight mb-2">
-                {user ? `Welcome Back, ${user.displayName?.split(' ')[0]}` : 'Welcome to CV Crafter'}
-              </h1>
-              <p className="text-slate-500">
-                {user ? 'Your professional journey continues here.' : 'Build your perfect CV with the power of AI.'}
-              </p>
-            </div>
-          </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Friendly Hero Banner */}
+          <div className="mb-8 p-8 rounded-3xl bg-gradient-to-br from-indigo-900 via-slate-900 to-indigo-950 text-white relative overflow-hidden shadow-xl">
+            <div className="absolute -right-12 -top-12 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute right-1/3 -bottom-12 w-48 h-48 bg-violet-500/20 rounded-full blur-2xl pointer-events-none" />
+            
+            <div className="relative z-10 max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs font-semibold mb-4 backdrop-blur-md">
+                <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin-slow" />
+                <span>Craft Standout Resumes with Ease</span>
+              </div>
+              <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-3 text-white">
+                {user ? `Hello, ${user.displayName?.split(' ')[0]} 👋` : 'Craft Your Next Winning Resume 👋'}
+              </h1>
+              <p className="text-indigo-100/90 text-sm md:text-base leading-relaxed mb-6">
+                Create tailored, professional CVs in minutes with automated AI content suggestions, instant ATS keyword scoring, and beautiful export options.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3 text-xs text-indigo-200 font-medium">
+                <span className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Free PDF &amp; Word Export
+                </span>
+                <span className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> ATS Compatibility Checker
+                </span>
+                <span className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-xl border border-white/10">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Local &amp; Safe Auto-Save
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Create New Card */}
             <motion.div 
               whileHover={{ y: -4 }}
-              className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
+              className="bg-white border border-slate-200/90 rounded-3xl p-7 flex flex-col justify-between gap-6 cursor-pointer hover:border-indigo-400 hover:shadow-lg transition-all group relative overflow-hidden"
               onClick={handleCreateNew}
             >
-              <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
-                <Plus className="text-indigo-600 group-hover:text-white w-6 h-6" />
+              <div className="space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-xs">
+                  <Plus className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg text-slate-900 group-hover:text-indigo-600 transition-colors">Start From Scratch</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Build step-by-step using our guided section builder, custom layout templates, and live preview.
+                  </p>
+                </div>
               </div>
-              <div className="text-center">
-                <h3 className="font-bold mb-1">Create from scratch</h3>
-                <p className="text-sm text-slate-400">Start with a blank template</p>
-              </div>
-              <Button onClick={handleCreateNew} className="mt-2">Start Building</Button>
+
+              <Button onClick={handleCreateNew} className="w-full rounded-xl bg-slate-900 hover:bg-indigo-600 text-white font-bold text-xs py-2.5 transition-colors">
+                Start Building Now
+              </Button>
             </motion.div>
 
             {/* AI Generation Card */}
             <motion.div 
               whileHover={{ y: -4 }}
-              className="bg-indigo-600 rounded-2xl p-8 text-white flex flex-col gap-4 shadow-xl shadow-indigo-200"
+              className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-700 rounded-3xl p-7 text-white flex flex-col justify-between gap-5 shadow-lg shadow-indigo-100 relative overflow-hidden md:col-span-1"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-200" />
-                  <h3 className="font-bold">AI Quick Generate</h3>
+                  <div className="p-1.5 bg-white/10 rounded-lg">
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                  </div>
+                  <h3 className="font-bold text-base text-white">AI Assistant Generator</h3>
                 </div>
                 {uploadedFile && (
                   <button 
@@ -1475,20 +1528,23 @@ export default function App() {
                   </button>
                 )}
               </div>
-              <p className="text-sm text-indigo-100">Paste your raw experience text or upload a file (PDF, Word, TXT, Image).</p>
               
+              <p className="text-xs text-indigo-100/90 leading-relaxed">
+                Paste your rough work history or upload your existing CV file (PDF/Word/Image) to auto-extract and structure it instantly.
+              </p>
+
               {!uploadedFile ? (
                 <div className="space-y-3">
                   <TextArea 
-                    placeholder="Paste your experience here..." 
-                    className="bg-indigo-700/50 border-indigo-500/50 text-white placeholder:text-indigo-300/70 text-xs min-h-[120px]"
+                    placeholder="Paste job title, bullet points, or past roles here..." 
+                    className="bg-indigo-900/40 border-indigo-400/40 text-white placeholder:text-indigo-200/60 text-xs min-h-[90px] rounded-xl focus:border-white/60"
                     value={rawText}
                     onChange={(e) => setRawText(e.target.value)}
                   />
                   <div className="flex items-center gap-2">
-                    <div className="h-px flex-1 bg-indigo-500/30" />
-                    <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-widest">OR</span>
-                    <div className="h-px flex-1 bg-indigo-500/30" />
+                    <div className="h-px flex-1 bg-indigo-400/30" />
+                    <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">OR FILE UPLOAD</span>
+                    <div className="h-px flex-1 bg-indigo-400/30" />
                   </div>
                   <input 
                     type="file" 
@@ -1502,28 +1558,27 @@ export default function App() {
                   />
                   <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-full py-3 border-2 border-dashed border-indigo-400/50 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-white/5 transition-all group"
+                    className="w-full py-2.5 bg-indigo-800/40 border border-dashed border-indigo-300/40 rounded-xl flex items-center justify-center gap-2 hover:bg-white/10 transition-all group"
                   >
-                    <FileUp className="w-6 h-6 text-indigo-300 group-hover:scale-110 transition-transform" />
-                    <span className="text-xs font-bold text-indigo-200">Upload CV File</span>
+                    <FileUp className="w-4 h-4 text-indigo-200 group-hover:scale-110 transition-transform" />
+                    <span className="text-xs font-semibold text-indigo-100">Upload PDF / Word File</span>
                   </button>
                 </div>
               ) : (
-                <div className="bg-white/10 rounded-xl p-4 border border-white/20 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-indigo-200" />
+                <div className="bg-white/15 rounded-xl p-3.5 border border-white/20 flex items-center gap-3">
+                  <div className="w-9 h-9 bg-white/10 rounded-lg flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5 text-indigo-200" />
                   </div>
                   <div className="flex-1 overflow-hidden">
-                    <p className="text-sm font-bold truncate">{uploadedFile.name}</p>
-                    <p className="text-[10px] text-indigo-300">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-xs font-bold truncate">{uploadedFile.name}</p>
+                    <p className="text-[10px] text-indigo-200">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</p>
                   </div>
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                 </div>
               )}
 
               <Button 
-                variant="secondary" 
-                className="w-full bg-white text-indigo-600 hover:bg-indigo-50"
+                className="w-full bg-white hover:bg-indigo-50 text-indigo-800 font-extrabold text-xs py-2.5 rounded-xl shadow-xs transition-colors"
                 onClick={(e) => {
                   e.preventDefault();
                   handleGenerate();
@@ -1533,47 +1588,68 @@ export default function App() {
                 {isGenerating ? (
                   <div className="flex flex-col items-center gap-1">
                     <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4" />
-                      <span>Generating...</span>
+                      <Sparkles className="w-4 h-4 animate-spin" />
+                      <span>Structuring Experience...</span>
                     </div>
-                    <span className="text-[10px] font-normal opacity-70">{loadingMessage}</span>
+                    <span className="text-[10px] font-normal opacity-80">{loadingMessage}</span>
                   </div>
-                ) : "Generate CV"}
+                ) : "✨ Generate Structured CV"}
               </Button>
             </motion.div>
 
             {/* My Saved CVs Entry Card */}
             <motion.div 
               whileHover={{ y: -4 }}
-              className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
+              className="bg-white border border-slate-200/90 rounded-3xl p-7 flex flex-col justify-between gap-6 cursor-pointer hover:border-indigo-400 hover:shadow-lg transition-all group relative overflow-hidden"
               onClick={() => setView("cv-list")}
             >
-              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
-                <FileText className="text-slate-600 group-hover:text-white w-6 h-6" />
+              <div className="space-y-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-xs">
+                  <FileText className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg text-slate-900 group-hover:text-emerald-600 transition-colors">My Saved Resumes</h3>
+                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-extrabold">
+                      {cvs.length}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    View, duplicate, edit, or download your saved CV versions anytime.
+                  </p>
+                </div>
               </div>
-              <div className="text-center">
-                <h3 className="font-bold mb-1">My Saved CVs</h3>
-                <p className="text-sm text-slate-400">{cvs.length} resumes saved</p>
-              </div>
-              <Button variant="outline" onClick={() => setView("cv-list")} className="mt-2">View Library</Button>
-            </motion.div>
 
-            {/* ATS / ATO CV Scanner Card */}
-            <motion.div 
-              whileHover={{ y: -4 }}
-              className="bg-white border border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
-              onClick={() => setView("ats-scanner")}
-            >
-              <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center group-hover:bg-indigo-600 transition-colors">
-                <Scan className="text-indigo-600 group-hover:text-white w-6 h-6" />
-              </div>
-              <div className="text-center">
-                <h3 className="font-bold mb-1">ATS / ATO CV Scanner</h3>
-                <p className="text-sm text-slate-400">See how ATS parsers read & audit your resume</p>
-              </div>
-              <Button variant="outline" onClick={() => setView("ats-scanner")} className="mt-2">Launch Scanner</Button>
+              <Button onClick={() => setView("cv-list")} variant="outline" className="w-full rounded-xl border-slate-200 text-slate-700 font-bold text-xs py-2.5 hover:bg-slate-50">
+                Manage My Saved CVs
+              </Button>
             </motion.div>
           </div>
+
+          {/* Quick ATS Scanner Banner */}
+          <motion.div 
+            whileHover={{ scale: 1.005 }}
+            onClick={() => setView("ats-scanner")}
+            className="mt-8 bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-violet-500/10 border border-indigo-200/60 rounded-3xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 cursor-pointer hover:border-indigo-300 transition-all"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-indigo-200">
+                <Scan className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-extrabold text-base text-slate-900">ATS / ATO Match Scanner</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-extrabold">NEW</span>
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Paste a job description to check keyword match scores, missing skills, and format readability before applying.
+                </p>
+              </div>
+            </div>
+            <Button size="sm" onClick={() => setView("ats-scanner")} className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl px-5 py-2.5 shadow-sm">
+              Launch Scanner &rarr;
+            </Button>
+          </motion.div>
         </main>
       </div>
     );
