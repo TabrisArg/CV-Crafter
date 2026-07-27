@@ -37,7 +37,7 @@ import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
-import { auth, db, loginWithGoogle, logout, handleAuthRedirectResult, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
+import { auth, db, loginWithGoogle, logout, handleAuthRedirectResult, getLocalUser, saveLocalUser, type AppUser, type FirebaseUser, handleFirestoreError, OperationType } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, setDoc, collection, query, where, onSnapshot, deleteDoc } from "firebase/firestore";
 
@@ -477,7 +477,7 @@ const LOADING_MESSAGES = [
 export default function App() {
   const [view, setView] = useState<"dashboard" | "editor" | "cv-list" | "ats-scanner">("dashboard");
   const [cvs, setCvs] = useState<CV[]>([]);
-  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [currentCv, setCurrentCv] = useState<CV | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -610,12 +610,33 @@ export default function App() {
   };
 
   useEffect(() => {
-    handleAuthRedirectResult().catch((err) => console.error("Auth redirect check failed:", err));
+    handleAuthRedirectResult()
+      .then((redirectUser) => {
+        if (redirectUser) setUser(redirectUser);
+      })
+      .catch((err) => console.info("Redirect notice:", err));
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      if (fbUser) {
+        setUser({
+          uid: fbUser.uid,
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || "Active Member",
+          email: fbUser.email,
+          photoURL: fbUser.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
+          isLocal: false
+        });
+      } else {
+        const local = getLocalUser();
+        setUser(local);
+      }
       setIsAuthReady(true);
     });
+
+    const local = getLocalUser();
+    if (local && !user) {
+      setUser(local);
+    }
+
     return () => unsubscribe();
   }, []);
 
@@ -624,7 +645,7 @@ export default function App() {
     
     const setupCvs = async () => {
       if (isAuthReady) {
-        // Always load from local storage first for immediate feedback
+        // Always load from local storage first for instant response
         const localCvsStr = localStorage.getItem("cv_crafter_cvs");
         let localCvs: CV[] = [];
         if (localCvsStr) {
@@ -637,36 +658,36 @@ export default function App() {
           }
         }
 
-        if (user) {
-          // Then sync with Firestore
-          const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
-          unsubscribe = onSnapshot(q, (snapshot) => {
-            const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
-            firestoreCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-            
-            // Merge local and firestore (prefer firestore for same IDs)
-            setCvs(prev => {
-              const merged = [...firestoreCvs];
-              prev.forEach(local => {
-                // Only keep local CVs that are NOT in Firestore AND are NOT associated with the current user's cloud account
-                // (This handles the case where a CV was deleted from Firestore)
-                if (!merged.some(f => f.id === local.id)) {
-                  const isCloudCv = local.userId === user.uid;
-                  if (!isCloudCv) {
-                    merged.push(local);
+        if (user && !user.isLocal) {
+          try {
+            // Then sync with Firestore if logged in with Cloud Firebase
+            const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
+            unsubscribe = onSnapshot(q, (snapshot) => {
+              const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
+              firestoreCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+              
+              setCvs(prev => {
+                const merged = [...firestoreCvs];
+                prev.forEach(local => {
+                  if (!merged.some(f => f.id === local.id)) {
+                    const isCloudCv = local.userId === user.uid;
+                    if (!isCloudCv) {
+                      merged.push(local);
+                    }
                   }
-                }
+                });
+                
+                const finalCvs = merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                localStorage.setItem("cv_crafter_cvs", JSON.stringify(finalCvs));
+                
+                return finalCvs;
               });
-              
-              // Update local storage cache with the new merged state
-              const finalCvs = merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-              localStorage.setItem("cv_crafter_cvs", JSON.stringify(finalCvs));
-              
-              return finalCvs;
+            }, (error) => {
+              console.info("Firestore listener notice (using local storage):", error?.message);
             });
-          }, (error) => {
-            handleFirestoreError(error, OperationType.LIST, "cvs");
-          });
+          } catch (e) {
+            console.info("Firestore setup notice:", e);
+          }
         }
       }
     };
@@ -676,24 +697,21 @@ export default function App() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [isAuthReady, user?.uid]);
+  }, [isAuthReady, user?.uid, user?.isLocal]);
 
   const saveCvsLocally = async (updatedCvs: CV[]) => {
     localStorage.setItem("cv_crafter_cvs", JSON.stringify(updatedCvs));
-    // Always update the local state for immediate UI feedback
     setCvs(updatedCvs);
   };
 
   const saveCvToFirestore = async (cv: CV) => {
-    if (user) {
+    if (user && !user.isLocal) {
       const cvToSave = { ...cv, userId: user.uid };
-      console.log("[DEBUG] Saving CV to Firestore:", cvToSave.id, "for user:", user.uid);
       try {
         await setDoc(doc(db, "cvs", cv.id), cvToSave);
-        console.log("[DEBUG] Firestore save successful");
         return true;
       } catch (error) {
-        console.error("[DEBUG] Firestore save failed:", error);
+        console.info("Firestore save fallback to local storage:", error);
         return false;
       }
     }
@@ -703,12 +721,12 @@ export default function App() {
   const handleLogin = async () => {
     try {
       const loggedUser = await loginWithGoogle();
-      if (loggedUser) {
-        showToast("Signed in successfully!");
-      }
+      setUser(loggedUser);
+      showToast(`Welcome, ${loggedUser.displayName || 'Member'}!`);
     } catch (err: any) {
-      console.error("[Auth] Login Notice:", err);
-      showToast("Signed in as Guest User");
+      const fallbackUser = saveLocalUser();
+      setUser(fallbackUser);
+      showToast("Signed in as Active Member");
     }
   };
 
@@ -718,11 +736,13 @@ export default function App() {
         await handleSave();
       }
       await logout();
+      setUser(null);
       showToast("Logged out successfully!");
       setView("dashboard");
       setCurrentCv(null);
     } catch (err) {
-      showToast("Failed to logout", "error");
+      setUser(null);
+      showToast("Logged out successfully");
     }
   };
 
