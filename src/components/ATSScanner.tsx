@@ -110,8 +110,48 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
           const arrayBuffer = await uploadedFile.arrayBuffer();
           const extracted = await mammoth.extractRawText({ arrayBuffer });
           result = await scanCVForATSFromText(extracted.value);
+        } else if (fileName.endsWith(".pdf")) {
+          try {
+            const arrayBuffer = await uploadedFile.arrayBuffer();
+            const decoder = new TextDecoder("utf-8");
+            const rawPdfText = decoder.decode(arrayBuffer);
+            
+            const printableText = rawPdfText
+              .replace(/[^\x20-\x7E\n\r\t]/g, " ")
+              .replace(/\s+/g, " ");
+
+            const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
+            const emailsFound = printableText.match(emailRegex) || [];
+
+            let formattedExtractedText = printableText;
+            if (emailsFound.length > 0) {
+              formattedExtractedText = `Email: ${emailsFound[0]}\n` + printableText;
+            }
+
+            result = await scanCVForATSFromText(formattedExtractedText);
+          } catch (pdfErr) {
+            console.warn("Client-side PDF text extraction warning:", pdfErr);
+            const base64 = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const res = reader.result as string;
+                resolve(res.split(",")[1]);
+              };
+              reader.onerror = () => reject(new Error("Failed to read file."));
+              reader.readAsDataURL(uploadedFile);
+            });
+
+            result = await scanCVForATSFromMultimodal([
+              {
+                inlineData: {
+                  data: base64,
+                  mimeType: uploadedFile.type || "application/pdf"
+                }
+              }
+            ]);
+          }
         } else {
-          // Multimodal PDF / PNG / JPG
+          // Multimodal PNG / JPG or other binary format
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
