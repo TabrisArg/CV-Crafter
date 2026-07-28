@@ -730,20 +730,23 @@ CRITICAL SIMULATION RULES:
 import { parseATSFromText, parseATSFromCVData } from "./atsParser";
 
 export async function scanCVForATSFromMultimodal(parts: any[]): Promise<ATSScanResult> {
-  // Purely deterministic text extraction and ATS scan
-  let extractedText = "";
-  for (const part of parts) {
-    if (part.text) {
-      extractedText += part.text + "\n";
-    } else if (part.inlineData) {
-      // For binary PDF/images, decode string content if printable or notify
-      extractedText += "Uploaded Document File (Binary PDF/Image Stream)\n";
+  try {
+    // Process PDF / image document through Gemini Multimodal OCR parser to extract structured CV data
+    const cvData = await generateCVFromMultimodal(parts);
+    return parseATSFromCVData(cvData);
+  } catch (error) {
+    console.warn("Multimodal ATS AI scan fallback to text stream:", error);
+    let extractedText = "";
+    for (const part of parts) {
+      if (part.text) {
+        extractedText += part.text + "\n";
+      }
     }
+    if (!extractedText.trim()) {
+      throw error;
+    }
+    return parseATSFromText(extractedText);
   }
-  if (!extractedText.trim()) {
-    extractedText = "Sample Resume Document\nEmail: candidate@example.com\nPhone: +1 555-0199\n\nWORK EXPERIENCE\nSoftware Engineer at Tech Corp (2021 - Present)\n- Developed React and Node.js web applications.\n\nEDUCATION\nBachelor of Science in Computer Science (2017 - 2021)\n\nSKILLS\nJavaScript, TypeScript, React, Node.js, SQL, Git";
-  }
-  return parseATSFromText(extractedText);
 }
 
 export async function scanCVForATSFromText(text: string): Promise<ATSScanResult> {

@@ -119,6 +119,7 @@ const STANDARD_SECTIONS = [
 export function parseATSFromText(rawText: string): ATSScanResult {
   // 1. Normalize raw text stream (simulating ATS plain text extraction)
   const cleanText = rawText
+    .replace(/[\u00A0\u200B\u200C\u200D\uFEFF]/g, " ")
     .replace(/\r\n/g, "\n")
     .replace(/[\t\f\v]/g, " ")
     .replace(/ +/g, " ")
@@ -131,20 +132,33 @@ export function parseATSFromText(rawText: string): ATSScanResult {
   const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
   const urlRegex = /https?:\/\/[^\s]+/gi;
 
-  const emailsFound = cleanText.match(emailRegex) || [];
+  let emailsFound = cleanText.match(emailRegex) || [];
+  
+  // Fallback for spaced/obfuscated emails (e.g. "john.doe [at] domain.com" or "john.doe @ domain.com")
+  if (emailsFound.length === 0) {
+    const obfuscatedMatch = cleanText.match(/[a-zA-Z0-9._%+-]+\s*(?:@|\[at\]|\(at\)|\sat\s)\s*[a-zA-Z0-9.-]+\s*(?:\.|\[dot\]|\(dot\)|\sdot\s)\s*[a-zA-Z]{2,}/gi);
+    if (obfuscatedMatch && obfuscatedMatch.length > 0) {
+      const normalizedEmail = obfuscatedMatch[0]
+        .replace(/\s*(?:\[at\]|\(at\)|\sat\s)\s*/gi, "@")
+        .replace(/\s*(?:\[dot\]|\(dot\)|\sdot\s)\s*/gi, ".")
+        .replace(/\s+/g, "");
+      emailsFound = [normalizedEmail];
+    }
+  }
+
   const phonesFound = cleanText.match(phoneRegex) || [];
   const urlsFound = cleanText.match(urlRegex) || [];
 
-  const email = emailsFound[0] || "";
+  const email = emailsFound[0] ? emailsFound[0].replace(/^mailto:/i, "").replace(/[<>()[\]]/g, "") : "";
   const phone = phonesFound[0] || "";
 
   // Extract Full Name (usually first line or before first header)
   let fullName = lines[0] || "";
-  if (fullName.length > 50 || /email|phone|experience|summary|education/i.test(fullName)) {
+  if (fullName.length > 50 || /email|phone|experience|summary|education|http|@/i.test(fullName)) {
     const candidateLine = lines.find(
-      (l) => l.length < 40 && !/email|phone|http|resume|cv|curriculum|summary|experience|skills/i.test(l)
+      (l) => l.length < 40 && !/@|email|phone|http|resume|cv|curriculum|summary|experience|skills/i.test(l)
     );
-    fullName = candidateLine || "";
+    fullName = candidateLine || lines[0] || "";
   }
 
   // Extract Location (search for City, State / City, Country patterns)
@@ -203,15 +217,27 @@ export function parseATSFromText(rawText: string): ATSScanResult {
     let isStandardHeader = false;
     let extractedHeader = "";
 
-    for (const line of lines) {
-      const lowerLine = line.toLowerCase();
-      if (sec.keywords.some((kw) => lowerLine.includes(kw))) {
+    if (sec.name === "Contact Information") {
+      // Contact information block is verified by present entities (email, phone, name)
+      if (email || phone || fullName) {
         found = true;
-        extractedHeader = line;
-        if (sec.keywords.slice(0, 2).some((kw) => lowerLine === kw || lowerLine.startsWith(kw))) {
-          isStandardHeader = true;
+        isStandardHeader = true;
+        extractedHeader = "Contact Information Header";
+      }
+    } else {
+      for (const line of lines) {
+        const lowerLine = line.toLowerCase();
+        // Skip lines that are just emails or URLs when searching for section headers
+        if (lowerLine.includes("@") || lowerLine.startsWith("http")) continue;
+
+        if (sec.keywords.some((kw) => lowerLine.includes(kw))) {
+          found = true;
+          extractedHeader = line;
+          if (sec.keywords.slice(0, 2).some((kw) => lowerLine === kw || lowerLine.startsWith(kw))) {
+            isStandardHeader = true;
+          }
+          break;
         }
-        break;
       }
     }
 
@@ -432,13 +458,44 @@ export function parseATSFromCVData(cv: CVData): ATSScanResult {
 
   const result = parseATSFromText(formattedText);
 
-  // Fine-tune entity counts directly from structured CV object
+  // Fine-tune entity counts and contact info directly from structured CV object
+  const email = cv.personalInfo?.email || result.parsedEntities.personalInfo.email;
+  const fullName = cv.personalInfo?.fullName || result.parsedEntities.personalInfo.fullName;
+  const phone = cv.personalInfo?.phone || result.parsedEntities.personalInfo.phone;
+  const location = cv.personalInfo?.location || result.parsedEntities.personalInfo.location;
+
   result.parsedEntities.workExperienceCount = cv.experience?.length || result.parsedEntities.workExperienceCount;
   result.parsedEntities.educationCount = cv.education?.length || result.parsedEntities.educationCount;
-  if (cv.personalInfo?.fullName) result.parsedEntities.personalInfo.fullName = cv.personalInfo.fullName;
-  if (cv.personalInfo?.email) result.parsedEntities.personalInfo.email = cv.personalInfo.email;
-  if (cv.personalInfo?.phone) result.parsedEntities.personalInfo.phone = cv.personalInfo.phone;
-  if (cv.personalInfo?.location) result.parsedEntities.personalInfo.location = cv.personalInfo.location;
+  if (fullName) result.parsedEntities.personalInfo.fullName = fullName;
+  if (email) result.parsedEntities.personalInfo.email = email;
+  if (phone) result.parsedEntities.personalInfo.phone = phone;
+  if (location) result.parsedEntities.personalInfo.location = location;
+
+  if (email) {
+    // Remove any false "Missing Email Address" issue
+    const missingEmailIdx = result.issues.findIndex((i) => i.title === "Missing Email Address");
+    if (missingEmailIdx !== -1) {
+      result.issues.splice(missingEmailIdx, 1, {
+        severity: "good",
+        title: "Email Address Parsed",
+        description: `Successfully indexed candidate email: ${email}`,
+        recommendation: "Ensure email remains unhyperlinked plain text for legacy parsers.",
+      });
+      result.quickFixes = result.quickFixes.filter((q) => !q.toLowerCase().includes("email"));
+      if (result.quickFixes.length === 0) {
+        result.quickFixes.push("Your CV layout and structure are 100% compliant with standard enterprise ATS parsers.");
+      }
+    }
+
+    // Recalculate contact information score if missing
+    if (result.scoreBreakdown.contactInformation.score < 60) {
+      result.scoreBreakdown.contactInformation = {
+        score: Math.max(85, result.scoreBreakdown.contactInformation.score + 35),
+        feedback: "Complete contact details detected.",
+        status: "pass",
+      };
+    }
+  }
 
   return result;
 }
