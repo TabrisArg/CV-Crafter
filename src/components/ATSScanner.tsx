@@ -18,7 +18,11 @@ import {
   Wrench, 
   Layers, 
   RefreshCw,
-  Zap
+  Zap,
+  Download,
+  Code,
+  Terminal,
+  Eye
 } from "lucide-react";
 import mammoth from "mammoth";
 import { 
@@ -66,6 +70,29 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
   const [scanResult, setScanResult] = useState<ATSScanResult | null>(null);
   const [activeResultTab, setActiveResultTab] = useState<"overview" | "raw" | "entities" | "sections" | "keywords">("overview");
   const [copiedRaw, setCopiedRaw] = useState(false);
+  const [rawViewMode, setRawViewMode] = useState<"stream" | "classifier" | "json">("stream");
+  const [copiedJson, setCopiedJson] = useState(false);
+
+  const downloadRawText = () => {
+    if (!scanResult) return;
+    const blob = new Blob([scanResult.rawExtractedText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "ats_machine_reader_stream.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("Downloaded machine text stream!");
+  };
+
+  const copyJsonOutput = () => {
+    if (!scanResult) return;
+    navigator.clipboard.writeText(JSON.stringify(scanResult, null, 2)).then(() => {
+      setCopiedJson(true);
+      showToast("ATS JSON payload copied!");
+      setTimeout(() => setCopiedJson(false), 2500);
+    });
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -694,28 +721,172 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
                 </div>
               )}
 
-              {/* Tab 2: Raw ATS Parser Stream */}
+              {/* Tab 2: Raw ATS Machine Reader Stream Showcase */}
               {activeResultTab === "raw" && (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
+                <div className="p-6 space-y-5">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900">Unformatted Plain Text Stream</h3>
-                      <p className="text-xs text-slate-500">
-                        This is the raw string of text an ATS parser stores in its database after stripping all visual formatting.
+                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <Terminal className="w-4 h-4 text-indigo-600" />
+                        Machine Reader Output & Text Stream
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Inspect how ATS parsers (Workday, Taleo, Greenhouse, Lever) strip visual styling and index your CV into recruiter database fields.
                       </p>
                     </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={downloadRawText}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download Stream (.txt)</span>
+                      </button>
+
+                      {rawViewMode === "json" ? (
+                        <button
+                          onClick={copyJsonOutput}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors flex items-center gap-1.5 border border-indigo-200"
+                        >
+                          {copiedJson ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedJson ? "Copied JSON" : "Copy JSON Payload"}</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={copyRawText}
+                          className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors flex items-center gap-1.5 border border-indigo-200"
+                        >
+                          {copiedRaw ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedRaw ? "Copied Text" : "Copy Raw Stream"}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Mode Selector Tabs */}
+                  <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl w-fit">
                     <button
-                      onClick={copyRawText}
-                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                      onClick={() => setRawViewMode("stream")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        rawViewMode === "stream"
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
                     >
-                      {copiedRaw ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedRaw ? "Copied" : "Copy Raw Stream"}</span>
+                      <FileText className="w-3.5 h-3.5" />
+                      Plain Text Stream
+                    </button>
+
+                    <button
+                      onClick={() => setRawViewMode("classifier")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        rawViewMode === "classifier"
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      Line Tokenizer & Classifier
+                    </button>
+
+                    <button
+                      onClick={() => setRawViewMode("json")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                        rawViewMode === "json"
+                          ? "bg-white text-indigo-700 shadow-sm"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Code className="w-3.5 h-3.5" />
+                      ATS Database JSON
                     </button>
                   </div>
 
-                  <div className="bg-slate-900 text-slate-100 p-5 rounded-xl text-xs font-mono whitespace-pre-wrap max-h-96 overflow-y-auto leading-relaxed border border-slate-800">
-                    {scanResult.rawExtractedText || "No raw text extracted."}
-                  </div>
+                  {/* View Mode 1: Plain Text Stream */}
+                  {rawViewMode === "stream" && (
+                    <div className="space-y-3">
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-800 flex items-start gap-2.5">
+                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>How Machines See This:</strong> Standard ATS engines flatten multi-column layouts into a single top-to-bottom plain text buffer. If contact info or headers get mixed across lines, recruiters will see garbled data.
+                        </span>
+                      </div>
+
+                      <div className="bg-slate-900 text-slate-100 p-5 rounded-xl text-xs font-mono whitespace-pre-wrap max-h-[420px] overflow-y-auto leading-relaxed border border-slate-800 shadow-inner">
+                        {scanResult.rawExtractedText ? (
+                          scanResult.rawExtractedText
+                        ) : (
+                          <span className="text-slate-500 italic">No raw text stream extracted.</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View Mode 2: Line Tokenizer / Classifier */}
+                  {rawViewMode === "classifier" && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-500">
+                        Line-by-line machine reader token classification showing how standard parser rule engines categorize extracted lines:
+                      </p>
+
+                      <div className="bg-slate-950 text-slate-100 p-4 rounded-xl text-xs font-mono max-h-[420px] overflow-y-auto border border-slate-800 space-y-1.5">
+                        {scanResult.rawExtractedText
+                          ?.split("\n")
+                          .filter((l) => l.trim().length > 0)
+                          .map((line, idx) => {
+                            const trimmed = line.trim();
+                            const lower = trimmed.toLowerCase();
+                            
+                            let tag = "BODY_TEXT";
+                            let badgeClass = "bg-slate-800 text-slate-300 border-slate-700";
+
+                            if (lower.includes("@") || lower.includes("http") || /^\+?\d[\d\s\-()]{7,}\d$/.test(trimmed)) {
+                              tag = "CONTACT_ENTITY";
+                              badgeClass = "bg-emerald-950 text-emerald-300 border-emerald-800";
+                            } else if (
+                              ["experience", "work history", "employment", "education", "qualifications", "skills", "summary", "profile", "projects", "certifications"].some((kw) => lower === kw || lower.startsWith(kw) || lower.endsWith(kw)) &&
+                              trimmed.length <= 45
+                            ) {
+                              tag = "SECTION_HEADER";
+                              badgeClass = "bg-indigo-950 text-indigo-300 border-indigo-700 font-bold";
+                            } else if (/\b(20\d\d|19\d\d|present|current)\b/i.test(trimmed)) {
+                              tag = "DATE_ROLE_ENTRY";
+                              badgeClass = "bg-blue-950 text-blue-300 border-blue-800";
+                            } else if (["degree", "bachelor", "master", "phd", "university", "college"].some((kw) => lower.includes(kw))) {
+                              tag = "EDUCATION_ENTRY";
+                              badgeClass = "bg-purple-950 text-purple-300 border-purple-800";
+                            } else if (scanResult.extractedKeywords.some((k) => lower.includes(k.keyword.toLowerCase()))) {
+                              tag = "SKILL_INDEX";
+                              badgeClass = "bg-amber-950 text-amber-300 border-amber-800";
+                            }
+
+                            return (
+                              <div key={idx} className="flex items-start gap-3 py-1 border-b border-slate-900/60 hover:bg-slate-900/80 px-2 rounded transition-colors">
+                                <span className="text-slate-600 text-[10px] w-8 text-right shrink-0 select-none">{idx + 1}</span>
+                                <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 ${badgeClass}`}>
+                                  {tag}
+                                </span>
+                                <span className="text-slate-200 break-all">{line}</span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View Mode 3: ATS Database JSON */}
+                  {rawViewMode === "json" && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-500">
+                        Complete candidate audit payload standard JSON structure ingested by enterprise applicant tracking webhooks:
+                      </p>
+
+                      <div className="bg-slate-950 text-emerald-400 p-5 rounded-xl text-xs font-mono max-h-[420px] overflow-y-auto border border-slate-800 shadow-inner">
+                        <pre>{JSON.stringify(scanResult, null, 2)}</pre>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

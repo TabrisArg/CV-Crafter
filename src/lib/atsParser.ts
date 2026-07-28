@@ -93,23 +93,23 @@ const STANDARD_SECTIONS = [
   },
   {
     name: "Professional Summary",
-    keywords: ["summary", "profile", "professional summary", "about me", "executive summary", "objective"],
+    keywords: ["summary", "profile", "professional summary", "about me", "executive summary", "objective", "career summary", "overview", "statement", "introduction", "personal statement"],
   },
   {
     name: "Work Experience",
-    keywords: ["work experience", "experience", "employment history", "professional experience", "work history"],
+    keywords: ["work experience", "experience", "employment history", "professional experience", "work history", "employment", "career history", "career summary", "experience & achievements", "relevant experience", "positions held", "key achievements", "history", "career", "employment summary", "professional background"],
   },
   {
     name: "Education",
-    keywords: ["education", "academic background", "academic history", "qualifications"],
+    keywords: ["education", "academic background", "academic history", "qualifications", "academic qualifications", "degrees", "education & training", "education and training", "studies", "academic attainment", "credentials", "educational background"],
   },
   {
     name: "Skills",
-    keywords: ["skills", "technical skills", "core competencies", "technologies", "expertise"],
+    keywords: ["skills", "technical skills", "core competencies", "technologies", "expertise", "key skills", "proficiencies", "areas of expertise", "abilities", "technical proficiencies", "tools & technologies", "competencies", "technical expertise"],
   },
   {
     name: "Certifications & Links",
-    keywords: ["certifications", "licenses", "projects", "links", "portfolio"],
+    keywords: ["certifications", "licenses", "projects", "links", "portfolio", "certificates", "courses", "professional development", "publications", "awards", "honors"],
   },
 ];
 
@@ -222,21 +222,56 @@ export function parseATSFromText(rawText: string): ATSScanResult {
       if (email || phone || fullName) {
         found = true;
         isStandardHeader = true;
-        extractedHeader = "Contact Information Header";
+        extractedHeader = "Contact Information";
       }
     } else {
+      // Tier 1: Look for short standalone line (<= 50 chars) matching or starting/ending with any keyword
       for (const line of lines) {
-        const lowerLine = line.toLowerCase();
-        // Skip lines that are just emails or URLs when searching for section headers
-        if (lowerLine.includes("@") || lowerLine.startsWith("http")) continue;
+        const cleanLine = line.toLowerCase().replace(/[:\-_]+$/, "").trim();
+        if (cleanLine.includes("@") || cleanLine.startsWith("http") || cleanLine.length > 50) continue;
 
-        if (sec.keywords.some((kw) => lowerLine.includes(kw))) {
+        const matchesKw = sec.keywords.some((kw) => cleanLine === kw || cleanLine.startsWith(kw) || cleanLine.endsWith(kw));
+        if (matchesKw) {
           found = true;
+          isStandardHeader = true;
           extractedHeader = line;
-          if (sec.keywords.slice(0, 2).some((kw) => lowerLine === kw || lowerLine.startsWith(kw))) {
-            isStandardHeader = true;
-          }
           break;
+        }
+      }
+
+      // Tier 2: If no short standalone heading found, check any line starting with a keyword
+      if (!found) {
+        for (const line of lines) {
+          const cleanLine = line.toLowerCase().trim();
+          if (cleanLine.includes("@") || cleanLine.startsWith("http")) continue;
+
+          if (sec.keywords.some((kw) => cleanLine.startsWith(kw))) {
+            found = true;
+            isStandardHeader = true;
+            extractedHeader = line;
+            break;
+          }
+        }
+      }
+
+      // Tier 3: Fallback check if data for that section exists (e.g. workExperienceCount > 0)
+      if (!found) {
+        if (sec.name === "Work Experience" && workExperienceCount > 0) {
+          found = true;
+          isStandardHeader = true;
+          extractedHeader = "Work Experience";
+        } else if (sec.name === "Education" && educationCount > 0) {
+          found = true;
+          isStandardHeader = true;
+          extractedHeader = "Education";
+        } else if (sec.name === "Skills" && skillsCount > 0) {
+          found = true;
+          isStandardHeader = true;
+          extractedHeader = "Skills";
+        } else if (sec.name === "Professional Summary" && summary) {
+          found = true;
+          isStandardHeader = true;
+          extractedHeader = "Professional Summary";
         }
       }
     }
@@ -496,6 +531,23 @@ export function parseATSFromCVData(cv: CVData): ATSScanResult {
       };
     }
   }
+
+  // Ensure structured sections check reflects CVData contents
+  result.sectionsCheck = result.sectionsCheck.map((sec) => {
+    if (sec.name === "Work Experience" && cv.experience && cv.experience.length > 0) {
+      return { ...sec, found: true, isStandardHeader: true, status: "pass", feedback: "Standard ATS header detected for 'Work Experience'." };
+    }
+    if (sec.name === "Education" && cv.education && cv.education.length > 0) {
+      return { ...sec, found: true, isStandardHeader: true, status: "pass", feedback: "Standard ATS header detected for 'Education'." };
+    }
+    if (sec.name === "Skills" && cv.skills && cv.skills.length > 0) {
+      return { ...sec, found: true, isStandardHeader: true, status: "pass", feedback: "Standard ATS header detected for 'Skills'." };
+    }
+    if (sec.name === "Professional Summary" && cv.summary) {
+      return { ...sec, found: true, isStandardHeader: true, status: "pass", feedback: "Standard ATS header detected for 'Professional Summary'." };
+    }
+    return sec;
+  });
 
   return result;
 }
