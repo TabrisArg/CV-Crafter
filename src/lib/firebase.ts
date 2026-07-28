@@ -99,37 +99,11 @@ export const loginWithGoogle = async (): Promise<AppUser> => {
         photoURL: result.user.photoURL,
       };
     }
+    throw new Error("No user returned from Google sign-in.");
   } catch (error: any) {
-    console.info("[Auth] Google Popup notice (using resilient Firebase Auth session):", error?.code || error?.message);
-    if (error?.code === "auth/popup-closed-by-user") {
-      throw error;
-    }
+    console.error("[Auth] loginWithGoogle error:", error);
+    throw error;
   }
-
-  // Fallback to resilient Firebase Authentication session (signInAnonymously)
-  // This guarantees a real Firebase Auth UID so Firestore rules & syncing work 100% on any domain.
-  try {
-    const anonResult = await signInAnonymously(auth);
-    if (anonResult?.user) {
-      if (!anonResult.user.displayName) {
-        await updateProfile(anonResult.user, {
-          displayName: "Google User",
-          photoURL: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-        });
-      }
-      await ensureUserProfile(anonResult.user);
-      return {
-        uid: anonResult.user.uid,
-        displayName: anonResult.user.displayName || "Google User",
-        email: anonResult.user.email || "user@google.com",
-        photoURL: anonResult.user.photoURL || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-      };
-    }
-  } catch (anonError) {
-    console.error("[Auth] Resilient Auth Session Error:", anonError);
-  }
-
-  throw new Error("Unable to complete sign in.");
 };
 
 export const handleAuthRedirectResult = async (): Promise<AppUser | null> => {
