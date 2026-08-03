@@ -135,14 +135,8 @@ async function startServer() {
       }
     });
 
-    // Mount apiRouter on both /api and as root middleware for max compatibility
+    // Mount apiRouter on /api
     app.use("/api", apiRouter);
-    app.use(apiRouter);
-
-    // Fallback JSON 404 for any unhandled /api/* request
-    app.all("/api/*", (req, res) => {
-      res.status(404).json({ error: `API route ${req.originalUrl} not found` });
-    });
 
     // Vite middleware for development
     if (process.env.NODE_ENV !== "production") {

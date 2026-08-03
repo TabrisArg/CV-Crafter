@@ -3,11 +3,11 @@ import type { CVData, MissingSkill, ATSScanResult } from "../lib/gemini";
 import { parseATSFromText, parseATSFromCVData } from "../lib/atsParser";
 
 function getAI() {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!apiKey || apiKey.trim() === "") {
     throw new Error("GEMINI_API_KEY environment variable is missing on the server. Please add GEMINI_API_KEY to your environment variables or AI Studio Secrets.");
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: apiKey.trim() });
 }
 
 const CV_SCHEMA = {

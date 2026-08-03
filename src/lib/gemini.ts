@@ -248,9 +248,7 @@ export async function generateCVFromMultimodal(parts: any[]): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromMultimodal, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) {
-      throw new Error(`AI processing failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
-    }
+    if (!clientAi) throw error;
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -279,9 +277,7 @@ export async function generateCVFromText(text: string): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromText, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) {
-      throw new Error(`AI text parsing failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
-    }
+    if (!clientAi) throw error;
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -362,9 +358,7 @@ export async function optimizeCVForJob(
   } catch (error: any) {
     console.warn("Server API failed for optimizeCVForJob, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) {
-      throw new Error(`Optimization failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
-    }
+    if (!clientAi) throw error;
 
     const userPrompt = jobUrl 
       ? `Optimize CV for job at ${jobUrl}. ${jobDescription || ""}`
@@ -408,9 +402,7 @@ export async function translateCV(cv: CVData, targetLanguage: string): Promise<C
   } catch (error: any) {
     console.warn("Server API failed for translateCV, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) {
-      throw new Error(`Translation failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
-    }
+    if (!clientAi) throw error;
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
