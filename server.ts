@@ -15,8 +15,8 @@ import {
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentFilename = typeof fileURLToPath !== "undefined" && import.meta && import.meta.url ? fileURLToPath(import.meta.url) : (typeof __filename !== "undefined" ? __filename : "");
+const currentDirname = currentFilename ? path.dirname(currentFilename) : (typeof __dirname !== "undefined" ? __dirname : process.cwd());
 
 async function startServer() {
   try {
@@ -137,6 +137,11 @@ async function startServer() {
 
     // Mount apiRouter on /api
     app.use("/api", apiRouter);
+
+    // API 404 fallback for unhandled /api requests
+    app.use("/api/*", (req, res) => {
+      res.status(404).json({ error: `API route ${req.originalUrl} not found` });
+    });
 
     // Vite middleware for development
     if (process.env.NODE_ENV !== "production") {

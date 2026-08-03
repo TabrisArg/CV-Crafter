@@ -295,7 +295,6 @@ export async function identifyMissingSkillsServer(cv: CVData, jobDescription: st
           }
         },
         temperature: 0.1,
-        tools: jobUrl ? [{ urlContext: {} }] : undefined,
       },
     });
 
@@ -359,7 +358,6 @@ export async function optimizeCVForJobServer(cv: CVData, jobDescription: string,
         responseSchema: CV_SCHEMA,
         temperature: 0.1,
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        tools: jobUrl ? [{ urlContext: {} }] : undefined,
       },
     });
 
