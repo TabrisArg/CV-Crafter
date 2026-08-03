@@ -248,7 +248,9 @@ export async function generateCVFromMultimodal(parts: any[]): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromMultimodal, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error("Backend API unavailable (404) and no VITE_GEMINI_API_KEY found. If deployed on Netlify, please add VITE_GEMINI_API_KEY to your Netlify Environment Variables and re-deploy.");
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -277,7 +279,9 @@ export async function generateCVFromText(text: string): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromText, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error("Backend API unavailable (404) and no VITE_GEMINI_API_KEY found. If deployed on Netlify, please add VITE_GEMINI_API_KEY to your Netlify Environment Variables and re-deploy.");
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -358,7 +362,9 @@ export async function optimizeCVForJob(
   } catch (error: any) {
     console.warn("Server API failed for optimizeCVForJob, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error("Backend API unavailable (404) and no VITE_GEMINI_API_KEY found. If deployed on Netlify, please add VITE_GEMINI_API_KEY to your Netlify Environment Variables and re-deploy.");
+    }
 
     const userPrompt = jobUrl 
       ? `Optimize CV for job at ${jobUrl}. ${jobDescription || ""}`
@@ -402,7 +408,9 @@ export async function translateCV(cv: CVData, targetLanguage: string): Promise<C
   } catch (error: any) {
     console.warn("Server API failed for translateCV, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error("Backend API unavailable (404) and no VITE_GEMINI_API_KEY found. If deployed on Netlify, please add VITE_GEMINI_API_KEY to your Netlify Environment Variables and re-deploy.");
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
