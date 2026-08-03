@@ -22,7 +22,18 @@ import {
   Download,
   Code,
   Terminal,
-  Eye
+  Eye,
+  Building,
+  Briefcase,
+  GraduationCap,
+  User,
+  Mail,
+  Phone,
+  MapPin,
+  Globe,
+  Search,
+  Award,
+  ExternalLink
 } from "lucide-react";
 import mammoth from "mammoth";
 import { 
@@ -68,7 +79,8 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
   const [isScanning, setIsScanning] = useState(false);
   const [scanStepIndex, setScanStepIndex] = useState(0);
   const [scanResult, setScanResult] = useState<ATSScanResult | null>(null);
-  const [activeResultTab, setActiveResultTab] = useState<"overview" | "raw" | "entities" | "sections" | "keywords">("overview");
+  const [activeResultTab, setActiveResultTab] = useState<"recruiter" | "overview" | "raw" | "sections" | "keywords">("recruiter");
+  const [recruiterPlatform, setRecruiterPlatform] = useState<"workday" | "greenhouse" | "lever">("workday");
   const [copiedRaw, setCopiedRaw] = useState(false);
   const [rawViewMode, setRawViewMode] = useState<"stream" | "classifier" | "json">("stream");
   const [copiedJson, setCopiedJson] = useState(false);
@@ -602,6 +614,23 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="flex items-center border-b border-slate-200 overflow-x-auto bg-slate-50/50 p-2 gap-2">
                 <button
+                  onClick={() => setActiveResultTab("recruiter")}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                    activeResultTab === "recruiter"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-700 hover:text-slate-900 bg-white border border-slate-200"
+                  }`}
+                >
+                  <Building className="w-4 h-4" />
+                  <span>Recruiter Portal View</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-extrabold ${
+                    activeResultTab === "recruiter" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
+                  }`}>
+                    Live
+                  </span>
+                </button>
+
+                <button
                   onClick={() => setActiveResultTab("overview")}
                   className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
                     activeResultTab === "overview"
@@ -611,30 +640,6 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
                 >
                   <ListChecks className="w-4 h-4" />
                   Issues & Recommendations ({scanResult.issues.length})
-                </button>
-
-                <button
-                  onClick={() => setActiveResultTab("raw")}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                    activeResultTab === "raw"
-                      ? "bg-white text-indigo-600 shadow border border-slate-200"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  <FileText className="w-4 h-4" />
-                  Raw ATS Parser Stream
-                </button>
-
-                <button
-                  onClick={() => setActiveResultTab("entities")}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                    activeResultTab === "entities"
-                      ? "bg-white text-indigo-600 shadow border border-slate-200"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  <Layers className="w-4 h-4" />
-                  Extracted Recruiter Profile
                 </button>
 
                 <button
@@ -659,6 +664,18 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
                 >
                   <Tag className="w-4 h-4" />
                   Indexed Skills ({scanResult.extractedKeywords.length})
+                </button>
+
+                <button
+                  onClick={() => setActiveResultTab("raw")}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                    activeResultTab === "raw"
+                      ? "bg-white text-indigo-600 shadow border border-slate-200"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <Terminal className="w-4 h-4" />
+                  Raw Text & Tokenizer
                 </button>
               </div>
 
@@ -890,74 +907,482 @@ export function ATSScanner({ cvs, currentCv, onBack, onOpenInEditor, showToast }
                 </div>
               )}
 
-              {/* Tab 3: Extracted Recruiter Profile */}
-              {activeResultTab === "entities" && (
+              {/* Primary Tab: Recruiter Portal View (Workday / Greenhouse / Lever Simulator) */}
+              {activeResultTab === "recruiter" && (
                 <div className="p-6 space-y-6">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 mb-1">Parsed Candidate Contact Info</h3>
-                    <p className="text-xs text-slate-500 mb-4">
-                      How an recruiter's applicant management dashboard displays your extracted metadata.
-                    </p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Full Name</span>
-                        <p className="text-xs font-bold text-slate-900 mt-1">
-                          {scanResult.parsedEntities.personalInfo.fullName || <span className="text-rose-500 font-normal italic">Not Found</span>}
-                        </p>
+                  {/* Recruiter System Header Bar */}
+                  <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-md border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-extrabold uppercase tracking-wide flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          ATS Candidate Database Record
+                        </span>
+                        <span className="text-slate-400 text-xs font-mono">ID: ATS-2026-94812</span>
                       </div>
+                      <h3 className="text-base font-bold text-white flex items-center gap-2">
+                        How Recruiters See Your Candidate Profile
+                      </h3>
+                      <p className="text-xs text-slate-300">
+                        This live simulation reflects how hiring managers view your parsed resume inside corporate ATS databases.
+                      </p>
+                    </div>
 
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Email Address</span>
-                        <p className="text-xs font-bold text-slate-900 mt-1">
-                          {scanResult.parsedEntities.personalInfo.email || <span className="text-rose-500 font-normal italic">Not Found</span>}
-                        </p>
-                      </div>
+                    {/* Platform Selector Switcher */}
+                    <div className="flex items-center bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0 self-start md:self-auto">
+                      <button
+                        onClick={() => setRecruiterPlatform("workday")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          recruiterPlatform === "workday"
+                            ? "bg-indigo-600 text-white shadow"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Building className="w-3.5 h-3.5" />
+                        <span>Workday</span>
+                      </button>
 
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Phone Number</span>
-                        <p className="text-xs font-bold text-slate-900 mt-1">
-                          {scanResult.parsedEntities.personalInfo.phone || <span className="text-rose-500 font-normal italic">Not Found</span>}
-                        </p>
-                      </div>
+                      <button
+                        onClick={() => setRecruiterPlatform("greenhouse")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          recruiterPlatform === "greenhouse"
+                            ? "bg-emerald-600 text-white shadow"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Briefcase className="w-3.5 h-3.5" />
+                        <span>Greenhouse</span>
+                      </button>
 
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Location</span>
-                        <p className="text-xs font-bold text-slate-900 mt-1">
-                          {scanResult.parsedEntities.personalInfo.location || <span className="text-slate-400 italic">Not Found</span>}
-                        </p>
-                      </div>
+                      <button
+                        onClick={() => setRecruiterPlatform("lever")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                          recruiterPlatform === "lever"
+                            ? "bg-purple-600 text-white shadow"
+                            : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Lever</span>
+                      </button>
                     </div>
                   </div>
 
-                  <div className="border-t border-slate-200 pt-6">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3">Structured Section Counters</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-slate-500 font-medium">Work History Roles</p>
-                          <p className="text-xl font-bold text-indigo-900 mt-0.5">{scanResult.parsedEntities.workExperienceCount} Parsed</p>
-                        </div>
-                        <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+                  {/* Summary Metric Cards Bar */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <span>Contact Entity</span>
+                        <User className="w-3.5 h-3.5 text-slate-400" />
                       </div>
+                      <p className="text-xs font-extrabold text-slate-900 truncate">
+                        {scanResult.parsedEntities.personalInfo.fullName || currentCv?.content.personalInfo.fullName || "Candidate"}
+                      </p>
+                      <p className="text-[10px] font-semibold text-emerald-600 mt-1 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Indexed in Database
+                      </p>
+                    </div>
 
-                      <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-slate-500 font-medium">Education Entries</p>
-                          <p className="text-xl font-bold text-indigo-900 mt-0.5">{scanResult.parsedEntities.educationCount} Parsed</p>
-                        </div>
-                        <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <span>Email Address</span>
+                        <Mail className="w-3.5 h-3.5 text-slate-400" />
                       </div>
+                      <p className="text-xs font-extrabold text-slate-900 truncate">
+                        {scanResult.parsedEntities.personalInfo.email || currentCv?.content.personalInfo.email || "Not Extracted"}
+                      </p>
+                      <p className="text-[10px] font-semibold text-emerald-600 mt-1 flex items-center gap-1">
+                        {scanResult.parsedEntities.personalInfo.email ? <Check className="w-3 h-3" /> : <XCircle className="w-3 h-3 text-rose-500" />}
+                        {scanResult.parsedEntities.personalInfo.email ? "Direct Contact Ready" : "Missing / Unindexed"}
+                      </p>
+                    </div>
 
-                      <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between">
-                        <div>
-                          <p className="text-xs text-slate-500 font-medium">Indexed Skills</p>
-                          <p className="text-xl font-bold text-indigo-900 mt-0.5">{scanResult.parsedEntities.skillsCount} Tags</p>
-                        </div>
-                        <CheckCircle2 className="w-6 h-6 text-indigo-600" />
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <span>Work History</span>
+                        <Briefcase className="w-3.5 h-3.5 text-slate-400" />
                       </div>
+                      <p className="text-xs font-extrabold text-slate-900">
+                        {scanResult.parsedEntities.workExperienceCount || currentCv?.content.experience.length || 0} Roles Parsed
+                      </p>
+                      <p className="text-[10px] font-semibold text-emerald-600 mt-1 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Chronology Indexed
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <span>Search Tags</span>
+                        <Tag className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                      <p className="text-xs font-extrabold text-slate-900">
+                        {scanResult.extractedKeywords.length} Skill Tags
+                      </p>
+                      <p className="text-[10px] font-semibold text-indigo-600 mt-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Searchable by Recruiter
+                      </p>
                     </div>
                   </div>
+
+                  {/* PLATFORM SPECIFIC RECRUITER VIEWS */}
+
+                  {/* 1. WORKDAY ENTERPRISE RECRUITER PORTAL */}
+                  {recruiterPlatform === "workday" && (
+                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                      {/* Workday Top Navigation Header */}
+                      <div className="bg-slate-800 text-white px-5 py-3.5 border-b border-slate-700 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white font-black text-xs flex items-center justify-center">
+                            WD
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Workday Recruiting Platform</span>
+                            <h4 className="text-xs font-bold text-white">Candidate Search & Application Record #WD-99214</h4>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 text-[10px]">
+                            Status: Qualified Applicant
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Workday Body Grid */}
+                      <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Left Column: Contact & Metadata Card */}
+                        <div className="space-y-4 md:col-span-1">
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                            <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+                              <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-bold text-lg flex items-center justify-center border border-indigo-200 shrink-0">
+                                {(scanResult.parsedEntities.personalInfo.fullName || currentCv?.content.personalInfo.fullName || "C").charAt(0)}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="text-sm font-bold text-slate-900 truncate">
+                                  {scanResult.parsedEntities.personalInfo.fullName || currentCv?.content.personalInfo.fullName || "Candidate Name"}
+                                </h4>
+                                <p className="text-xs font-semibold text-slate-500 truncate">
+                                  {currentCv?.content.suggestedTitle || "Extracted Candidate Profile"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2 text-xs">
+                              <div className="flex items-center gap-2 text-slate-700">
+                                <Mail className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span className="font-semibold truncate">{scanResult.parsedEntities.personalInfo.email || currentCv?.content.personalInfo.email || <span className="text-rose-500 italic">Not Extracted</span>}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-700">
+                                <Phone className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span className="font-semibold">{scanResult.parsedEntities.personalInfo.phone || currentCv?.content.personalInfo.phone || <span className="text-slate-400 italic">Not Extracted</span>}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-700">
+                                <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <span className="font-semibold">{scanResult.parsedEntities.personalInfo.location || currentCv?.content.personalInfo.location || <span className="text-slate-400 italic">Not Extracted</span>}</span>
+                              </div>
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-200">
+                              <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">ATS Parser Index Status</span>
+                              <div className="space-y-1 text-[11px]">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-600">Contact Details</span>
+                                  <span className="font-bold text-emerald-600">Indexed 100%</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-600">Work Experience</span>
+                                  <span className="font-bold text-emerald-600">{scanResult.parsedEntities.workExperienceCount} Positions</span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-slate-600">Education Entries</span>
+                                  <span className="font-bold text-emerald-600">{scanResult.parsedEntities.educationCount} Degrees</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Workday Skill Tag Cloud */}
+                          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <h5 className="text-xs font-bold text-slate-900 mb-2 flex items-center justify-between">
+                              <span>Workday Indexed Competencies</span>
+                              <span className="text-[10px] text-indigo-600 font-bold">{scanResult.extractedKeywords.length} tags</span>
+                            </h5>
+                            <div className="flex flex-wrap gap-1.5">
+                              {scanResult.extractedKeywords.map((kw, i) => (
+                                <span key={i} className="px-2 py-1 rounded bg-white text-slate-700 text-[10px] font-semibold border border-slate-200">
+                                  {kw.keyword}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Column: Workday Candidate Records */}
+                        <div className="space-y-5 md:col-span-2">
+                          {/* Summary Box */}
+                          {currentCv?.content.summary && (
+                            <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
+                              <h5 className="text-xs font-bold text-indigo-950 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                                <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                                Candidate Executive Summary (Parsed)
+                              </h5>
+                              <p className="text-xs text-slate-700 leading-relaxed">
+                                {currentCv.content.summary}
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Work History */}
+                          <div className="space-y-3">
+                            <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center justify-between">
+                              <span className="flex items-center gap-1.5">
+                                <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
+                                Work Experience Database Field Records
+                              </span>
+                              <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                Parsed & Standardized
+                              </span>
+                            </h5>
+
+                            {currentCv && currentCv.content.experience.length > 0 ? (
+                              <div className="space-y-3">
+                                {currentCv.content.experience.map((exp, idx) => (
+                                  <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 space-y-2">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                      <h6 className="text-xs font-bold text-slate-900">{exp.position}</h6>
+                                      <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 w-fit">
+                                        {exp.startDate} – {exp.endDate}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs font-semibold text-indigo-700 flex items-center gap-2">
+                                      <Building className="w-3 h-3 text-indigo-500" />
+                                      <span>{exp.company}</span>
+                                      {exp.location && <span className="text-slate-400 font-normal">| {exp.location}</span>}
+                                    </div>
+                                    {exp.highlights && exp.highlights.length > 0 && (
+                                      <ul className="text-xs text-slate-600 list-disc list-inside space-y-1 pt-1">
+                                        {exp.highlights.map((h, i) => (
+                                          <li key={i}>{h}</li>
+                                        ))}
+                                      </ul>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-600">
+                                <p className="font-bold text-slate-800 mb-1">Parsed Experience Stream Summary:</p>
+                                <p className="italic text-slate-500">
+                                  {scanResult.parsedEntities.workExperienceCount > 0
+                                    ? `${scanResult.parsedEntities.workExperienceCount} positions recognized from document text.`
+                                    : "No explicit work history section recognized."}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Education Section */}
+                          <div className="space-y-3">
+                            <h5 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                              <GraduationCap className="w-3.5 h-3.5 text-indigo-600" />
+                              Education & Academic Credentials
+                            </h5>
+
+                            {currentCv && currentCv.content.education.length > 0 ? (
+                              <div className="space-y-2">
+                                {currentCv.content.education.map((edu, idx) => (
+                                  <div key={idx} className="bg-white p-3.5 rounded-xl border border-slate-200 flex items-start justify-between text-xs">
+                                    <div>
+                                      <h6 className="font-bold text-slate-900">{edu.degree}</h6>
+                                      <p className="text-slate-600 font-medium">{edu.school}</p>
+                                    </div>
+                                    <span className="text-slate-500 font-medium shrink-0 bg-slate-100 px-2 py-0.5 rounded text-[10px]">
+                                      {edu.graduationDate}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600">
+                                <p className="font-semibold">Education Entries: {scanResult.parsedEntities.educationCount} parsed</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. GREENHOUSE TALENT BOARD VIEW */}
+                  {recruiterPlatform === "greenhouse" && (
+                    <div className="border border-emerald-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                      {/* Greenhouse Header */}
+                      <div className="bg-emerald-900 text-white px-5 py-3.5 border-b border-emerald-800 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white font-black text-xs flex items-center justify-center">
+                            GH
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-emerald-300 tracking-wider">Greenhouse Recruiting Portal</span>
+                            <h4 className="text-xs font-bold text-white">Candidate Scorecard & Requisition Match</h4>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-3 py-1 rounded-full bg-emerald-500/30 text-emerald-200 font-extrabold text-xs border border-emerald-400/40">
+                            Requisition Score: {scanResult.overallScore}%
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-6 space-y-5">
+                        {/* Candidate Bio Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-emerald-50/60 border border-emerald-200">
+                          <div>
+                            <h3 className="text-base font-extrabold text-emerald-950">
+                              {scanResult.parsedEntities.personalInfo.fullName || currentCv?.content.personalInfo.fullName || "Candidate"}
+                            </h3>
+                            <p className="text-xs font-bold text-emerald-700 mt-0.5">
+                              {currentCv?.content.suggestedTitle || "Applicant Candidate"}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-slate-700">
+                              <span className="flex items-center gap-1 font-semibold text-emerald-800">
+                                <Mail className="w-3.5 h-3.5 text-emerald-600" />
+                                {scanResult.parsedEntities.personalInfo.email || currentCv?.content.personalInfo.email || "No Email"}
+                              </span>
+                              <span className="flex items-center gap-1 font-semibold text-emerald-800">
+                                <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                                {scanResult.parsedEntities.personalInfo.phone || currentCv?.content.personalInfo.phone || "No Phone"}
+                              </span>
+                              <span className="flex items-center gap-1 font-semibold text-emerald-800">
+                                <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                                {scanResult.parsedEntities.personalInfo.location || currentCv?.content.personalInfo.location || "No Location"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 space-y-1.5 text-right">
+                            <span className="inline-block px-3 py-1 bg-emerald-600 text-white font-extrabold text-xs rounded-lg shadow-sm">
+                              Stage: Recruiter Review
+                            </span>
+                            <p className="text-[10px] text-slate-500 font-semibold block">
+                              Source: Parsed Document Upload
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Keyword Requisition Alignment */}
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-2 flex items-center justify-between">
+                            <span>Greenhouse Extracted Tags ({scanResult.extractedKeywords.length})</span>
+                            <span className="text-[10px] font-bold text-emerald-600">Matched to Open Job Role</span>
+                          </h4>
+                          <div className="flex flex-wrap gap-1.5">
+                            {scanResult.extractedKeywords.map((kw, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-100/80 text-emerald-900 text-xs font-bold border border-emerald-200"
+                              >
+                                #{kw.keyword}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Work History Summary */}
+                        {currentCv && currentCv.content.experience.length > 0 && (
+                          <div className="space-y-3 pt-2">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                              Greenhouse Work History Summary
+                            </h4>
+                            <div className="space-y-2">
+                              {currentCv.content.experience.map((exp, idx) => (
+                                <div key={idx} className="p-3.5 rounded-xl border border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                                  <div>
+                                    <p className="font-extrabold text-slate-900">{exp.position}</p>
+                                    <p className="text-slate-600 font-semibold">{exp.company}</p>
+                                  </div>
+                                  <span className="text-slate-500 font-medium bg-slate-100 px-2 py-1 rounded text-[10px] w-fit">
+                                    {exp.startDate} – {exp.endDate}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 3. LEVER PIPELINE VIEW */}
+                  {recruiterPlatform === "lever" && (
+                    <div className="border border-purple-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+                      {/* Lever Header */}
+                      <div className="bg-purple-950 text-white px-5 py-3.5 border-b border-purple-900 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-purple-600 text-white font-black text-xs flex items-center justify-center">
+                            LV
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-purple-300 tracking-wider">Lever Talent Pipeline</span>
+                            <h4 className="text-xs font-bold text-white">Candidate Opportunity Card</h4>
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-1 bg-purple-800 text-purple-200 rounded text-xs font-bold border border-purple-700">
+                          Pipeline Stage: Screen
+                        </span>
+                      </div>
+
+                      <div className="p-6 space-y-5">
+                        <div className="flex items-start justify-between pb-4 border-b border-slate-200">
+                          <div>
+                            <h3 className="text-base font-extrabold text-purple-950">
+                              {scanResult.parsedEntities.personalInfo.fullName || currentCv?.content.personalInfo.fullName || "Candidate Profile"}
+                            </h3>
+                            <p className="text-xs text-purple-700 font-bold mt-0.5">
+                              {currentCv?.content.suggestedTitle || "Applicant Candidate"}
+                            </p>
+                          </div>
+                          <span className="text-xs font-bold text-purple-700 bg-purple-50 px-3 py-1 rounded-full border border-purple-200">
+                            {scanResult.overallScore}% Requisition Match
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                          <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100">
+                            <span className="text-[10px] font-bold text-purple-400 uppercase">Email Contact</span>
+                            <p className="font-bold text-slate-900 truncate mt-0.5">
+                              {scanResult.parsedEntities.personalInfo.email || currentCv?.content.personalInfo.email || "Missing"}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100">
+                            <span className="text-[10px] font-bold text-purple-400 uppercase">Phone</span>
+                            <p className="font-bold text-slate-900 truncate mt-0.5">
+                              {scanResult.parsedEntities.personalInfo.phone || currentCv?.content.personalInfo.phone || "Missing"}
+                            </p>
+                          </div>
+                          <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100">
+                            <span className="text-[10px] font-bold text-purple-400 uppercase">Location</span>
+                            <p className="font-bold text-slate-900 truncate mt-0.5">
+                              {scanResult.parsedEntities.personalInfo.location || currentCv?.content.personalInfo.location || "Missing"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Lever Extracted Tags */}
+                        <div>
+                          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+                            Lever Tag Cloud ({scanResult.extractedKeywords.length})
+                          </h4>
+                          <div className="flex flex-wrap gap-1.5">
+                            {scanResult.extractedKeywords.map((kw, i) => (
+                              <span key={i} className="px-2.5 py-1 rounded-full bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200">
+                                {kw.keyword}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

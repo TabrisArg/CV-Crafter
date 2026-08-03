@@ -4,6 +4,14 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import cors from "cors";
+import {
+  generateCVFromMultimodalServer,
+  generateCVFromTextServer,
+  identifyMissingSkillsServer,
+  optimizeCVForJobServer,
+  translateCVServer,
+  scanCVForATSFromMultimodalServer,
+} from "./src/server/geminiService";
 
 dotenv.config();
 
@@ -24,7 +32,7 @@ async function startServer() {
       credentials: true,
     }));
 
-    app.use(express.json());
+    app.use(express.json({ limit: "50mb" }));
 
     // API Router
     const apiRouter = express.Router();
@@ -40,6 +48,91 @@ async function startServer() {
 
     apiRouter.get("/ping", (req, res) => {
       res.json({ status: "ok", time: new Date().toISOString() });
+    });
+
+    // Gemini API routes
+    apiRouter.post("/gemini/generate-cv-multimodal", async (req, res) => {
+      try {
+        const { parts } = req.body;
+        if (!parts || !Array.isArray(parts)) {
+          return res.status(400).json({ error: "Missing or invalid parts parameter" });
+        }
+        const result = await generateCVFromMultimodalServer(parts);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/generate-cv-multimodal:", err);
+        res.status(500).json({ error: err.message || "Failed to process document with AI" });
+      }
+    });
+
+    apiRouter.post("/gemini/generate-cv-text", async (req, res) => {
+      try {
+        const { text } = req.body;
+        if (!text || typeof text !== "string") {
+          return res.status(400).json({ error: "Missing or invalid text parameter" });
+        }
+        const result = await generateCVFromTextServer(text);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/generate-cv-text:", err);
+        res.status(500).json({ error: err.message || "Failed to parse text with AI" });
+      }
+    });
+
+    apiRouter.post("/gemini/identify-missing-skills", async (req, res) => {
+      try {
+        const { cv, jobDescription, jobUrl } = req.body;
+        if (!cv) {
+          return res.status(400).json({ error: "Missing CV parameter" });
+        }
+        const result = await identifyMissingSkillsServer(cv, jobDescription || "", jobUrl);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/identify-missing-skills:", err);
+        res.status(500).json({ error: err.message || "Failed to identify missing skills" });
+      }
+    });
+
+    apiRouter.post("/gemini/optimize-cv", async (req, res) => {
+      try {
+        const { cv, jobDescription, jobUrl, additionalSkills } = req.body;
+        if (!cv) {
+          return res.status(400).json({ error: "Missing CV parameter" });
+        }
+        const result = await optimizeCVForJobServer(cv, jobDescription || "", jobUrl, additionalSkills);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/optimize-cv:", err);
+        res.status(500).json({ error: err.message || "Failed to optimize CV" });
+      }
+    });
+
+    apiRouter.post("/gemini/translate-cv", async (req, res) => {
+      try {
+        const { cv, targetLanguage } = req.body;
+        if (!cv || !targetLanguage) {
+          return res.status(400).json({ error: "Missing cv or targetLanguage parameter" });
+        }
+        const result = await translateCVServer(cv, targetLanguage);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/translate-cv:", err);
+        res.status(500).json({ error: err.message || "Failed to translate CV" });
+      }
+    });
+
+    apiRouter.post("/gemini/scan-ats-multimodal", async (req, res) => {
+      try {
+        const { parts } = req.body;
+        if (!parts || !Array.isArray(parts)) {
+          return res.status(400).json({ error: "Missing or invalid parts parameter" });
+        }
+        const result = await scanCVForATSFromMultimodalServer(parts);
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/scan-ats-multimodal:", err);
+        res.status(500).json({ error: err.message || "Failed to run ATS scan" });
+      }
     });
 
     app.use("/api", apiRouter);
