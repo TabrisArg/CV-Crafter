@@ -106,11 +106,26 @@ export interface ATSScanResult {
 
 function getClientAI() {
   const metaEnv = (import.meta as any).env || {};
-  const apiKey = metaEnv.VITE_GEMINI_API_KEY || (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) || "";
+  let apiKey = "";
+
+  try {
+    apiKey = process.env.GEMINI_API_KEY || "";
+  } catch (e) {
+    // process not defined
+  }
+
+  if (!apiKey) {
+    apiKey = metaEnv.VITE_GEMINI_API_KEY || metaEnv.GEMINI_API_KEY || "";
+  }
+
+  if (!apiKey && typeof window !== "undefined") {
+    apiKey = (window as any).GEMINI_API_KEY || localStorage.getItem("GEMINI_API_KEY") || "";
+  }
+
   if (!apiKey || apiKey.trim() === "") {
     return null;
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey: apiKey.trim() });
 }
 
 function cleanJsonString(str: string): string {
@@ -233,7 +248,9 @@ export async function generateCVFromMultimodal(parts: any[]): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromMultimodal, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error(`AI processing failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -262,7 +279,9 @@ export async function generateCVFromText(text: string): Promise<CVData> {
   } catch (error: any) {
     console.warn("Server API failed for generateCVFromText, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error(`AI text parsing failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -343,7 +362,9 @@ export async function optimizeCVForJob(
   } catch (error: any) {
     console.warn("Server API failed for optimizeCVForJob, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error(`Optimization failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
+    }
 
     const userPrompt = jobUrl 
       ? `Optimize CV for job at ${jobUrl}. ${jobDescription || ""}`
@@ -387,7 +408,9 @@ export async function translateCV(cv: CVData, targetLanguage: string): Promise<C
   } catch (error: any) {
     console.warn("Server API failed for translateCV, attempting client fallback:", error.message);
     const clientAi = getClientAI();
-    if (!clientAi) throw error;
+    if (!clientAi) {
+      throw new Error(`Translation failed (${error.message || "404 Not Found"}). Please check your server or GEMINI_API_KEY configuration.`);
+    }
 
     const response = await clientAi.models.generateContent({
       model: "gemini-3-flash-preview",
