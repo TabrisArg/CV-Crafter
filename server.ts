@@ -11,6 +11,7 @@ import {
   optimizeCVForJobServer,
   translateCVServer,
   scanCVForATSFromMultimodalServer,
+  generateCoverLetterServer,
 } from "./src/server/geminiService";
 
 dotenv.config();
@@ -104,6 +105,20 @@ async function startServer() {
       } catch (err: any) {
         console.error("Error in /api/gemini/optimize-cv:", err);
         res.status(500).json({ error: err.message || "Failed to optimize CV" });
+      }
+    });
+
+    apiRouter.post("/gemini/cover-letter", async (req, res) => {
+      try {
+        const { cv, companyName, jobTitle, jobDescription, hiringManager, tone } = req.body;
+        if (!cv || !companyName || !jobTitle) {
+          return res.status(400).json({ error: "Missing required parameters: cv, companyName, and jobTitle are required." });
+        }
+        const result = await generateCoverLetterServer({ cv, companyName, jobTitle, jobDescription, hiringManager, tone });
+        res.json(result);
+      } catch (err: any) {
+        console.error("Error in /api/gemini/cover-letter:", err);
+        res.status(500).json({ error: err.message || "Failed to generate cover letter" });
       }
     });
 

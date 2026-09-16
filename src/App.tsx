@@ -25,16 +25,18 @@ import {
   Copy,
   RefreshCw,
   Check,
-  Scan
+  Scan,
+  Target
 } from "lucide-react";
 import { ATSScanner } from "./components/ATSScanner";
 import { UnauthorizedDomainModal } from "./components/UnauthorizedDomainModal";
 import { AuthModal } from "./components/AuthModal";
+import { CoverLetterModal } from "./components/CoverLetterModal";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill } from "./lib/gemini";
+import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill, normalizeCVData } from "./lib/gemini";
 import mammoth from "mammoth";
-import { exportToSelectablePDF, exportForPlatforms } from "./lib/pdfExport";
+import { exportToSelectablePDF, exportForPlatforms, tokenizeMarkdown, stripMarkdown } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
@@ -68,20 +70,55 @@ interface UserProfile {
 const BACKEND_URL = ""; // Use relative paths for Netlify proxying
 console.log(`[DEBUG] Backend URL: ${BACKEND_URL || "Relative (Netlify Proxy)"}`);
 
+const renderInlineMarkdown = (str: string) => {
+  if (!str) return null;
+  const tokens = tokenizeMarkdown(str);
+  return tokens.map((token, i) => {
+    if (token.bold && token.italic) {
+      return <strong key={i} className="font-bold italic text-slate-900">{token.text}</strong>;
+    }
+    if (token.bold) {
+      return <strong key={i} className="font-bold text-slate-900">{token.text}</strong>;
+    }
+    if (token.italic) {
+      return <em key={i} className="italic text-slate-800">{token.text}</em>;
+    }
+    if (token.code) {
+      return <code key={i} className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">{token.text}</code>;
+    }
+    if (token.strikethrough) {
+      return <span key={i} className="line-through">{token.text}</span>;
+    }
+    if (token.link) {
+      return (
+        <a key={i} href={token.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
+          {token.text}
+        </a>
+      );
+    }
+    return <span key={i}>{token.text}</span>;
+  });
+};
+
 const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?: string, className?: string }) => {
   const components = {
     p: ({children}: any) => <span className="inline">{children}</span>,
-    strong: ({children}: any) => <strong className="font-bold text-slate-900">{children}</strong>
+    strong: ({children}: any) => <strong className="font-bold text-slate-900">{children}</strong>,
+    em: ({children}: any) => <em className="italic text-slate-800">{children}</em>,
   };
 
   const popupComponents = {
     p: ({children}: any) => <span className="inline text-slate-100">{children}</span>,
     strong: ({children}: any) => <strong className="font-bold text-white shadow-sm">{children}</strong>,
+    em: ({children}: any) => <em className="italic text-slate-200">{children}</em>,
     li: ({children}: any) => <li className="text-slate-100">{children}</li>,
     ul: ({children}: any) => <ul className="list-disc ml-4 text-slate-100">{children}</ul>
   };
 
   if (!newText) return null;
+
+  const cleanOld = oldText ? stripMarkdown(oldText) : "";
+  const cleanNew = newText ? stripMarkdown(newText) : "";
 
   // If oldText is undefined, we are not in diff mode, just render normally
   if (oldText === undefined) {
@@ -93,10 +130,10 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
   }
 
   // Case 1: Pure Addition (Entirely new block in diff mode)
-  if (!oldText || oldText.trim() === "") {
+  if (!cleanOld) {
     return (
-      <span className={cn("relative group inline-block w-full", className)}>
-        <span className="text-emerald-600 bg-emerald-50/90 rounded px-1 border border-emerald-200 italic inline-block font-medium">
+      <span className={cn("relative group inline", className)}>
+        <span className="text-emerald-600 bg-emerald-50/90 rounded px-1 border border-emerald-200 italic inline font-medium">
           <ReactMarkdown components={components}>{newText}</ReactMarkdown>
         </span>
         <span className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[11px] p-3 rounded-xl shadow-2xl z-50 min-w-[180px] border border-slate-700 ring-4 ring-black/10">
@@ -111,8 +148,8 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
     );
   }
 
-  // Case 2: No change
-  if (oldText === newText) {
+  // Case 2: No structural text change (ignoring markdown formatting differences)
+  if (cleanOld.toLowerCase() === cleanNew.toLowerCase()) {
     return (
       <span className={className}>
         <ReactMarkdown components={components}>{newText}</ReactMarkdown>
@@ -124,7 +161,7 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
   const diff = diffWords(oldText, newText);
   
   return (
-    <span className={cn("relative group inline-block w-full", className)}>
+    <span className={cn("relative group inline", className)}>
       <span className="inline">
         {diff.map((part, index) => {
           if (part.added) {
@@ -135,18 +172,18 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
               <span 
                 key={index} 
                 className={cn(
-                  "rounded px-0.5 border italic font-medium mx-0.5",
+                  "rounded px-0.5 border italic font-medium mx-0.5 inline",
                   isModification 
                     ? "text-rose-600 bg-rose-50/90 border-rose-200" 
                     : "text-emerald-600 bg-emerald-50/90 border-emerald-200"
                 )}
               >
-                {part.value}
+                {renderInlineMarkdown(part.value)}
               </span>
             );
           }
           if (part.removed) return null; // Don't show removed text in main view
-          return <span key={index}>{part.value}</span>;
+          return <span key={index} className="inline">{renderInlineMarkdown(part.value)}</span>;
         })}
       </span>
       
@@ -487,7 +524,7 @@ export default function App() {
   const [missingSkills, setMissingSkills] = useState<MissingSkill[]>([]);
   const [showSkillsModal, setShowSkillsModal] = useState(false);
   const [currentSkillIndex, setCurrentSkillIndex] = useState(0);
-  const [confirmedSkills, setConfirmedSkills] = useState<Array<{ skill: string, placement: "skills" | string }>>([]);
+  const [confirmedSkills, setConfirmedSkills] = useState<Array<{ skill: string, placement: "skills" | string, company?: string, position?: string }>>([]);
   const [selectingExperienceFor, setSelectingExperienceFor] = useState<string | null>(null);
 
   const [rawText, setRawText] = useState("");
@@ -495,6 +532,7 @@ export default function App() {
   const [jobUrl, setJobUrl] = useState("");
   const [optimizeTab, setOptimizeTab] = useState<"manual" | "link">("manual");
   const [showJobModal, setShowJobModal] = useState(false);
+  const [showCoverLetterModal, setShowCoverLetterModal] = useState(false);
   const [activeTemplate, setActiveTemplate] = useState("modern");
   const [error, setError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -502,6 +540,13 @@ export default function App() {
   const [loadingMessage, setLoadingMessage] = useState("");
   const [pendingOptimizedCv, setPendingOptimizedCv] = useState<CV | null>(null);
   const [isDiffMode, setIsDiffMode] = useState(false);
+  const [showCompanyPosModal, setShowCompanyPosModal] = useState(false);
+  const [pendingCvForNaming, setPendingCvForNaming] = useState<CV | null>(null);
+  const [companyPosInput, setCompanyPosInput] = useState<{ company: string; position: string; baseCvTitle: string }>({
+    company: "",
+    position: "",
+    baseCvTitle: ""
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -511,6 +556,13 @@ export default function App() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isTranslating, setIsTranslating] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: "success" | "error" } | null>(null);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
+    id: string;
+    title: string;
+    isBaseWithChildren?: boolean;
+  } | null>(null);
+  const [showMatchRateModal, setShowMatchRateModal] = useState(false);
+  const [activeMatchRateCv, setActiveMatchRateCv] = useState<CV | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
@@ -526,17 +578,17 @@ export default function App() {
     text += `${data.personalInfo.email} | ${data.personalInfo.phone} | ${data.personalInfo.location}\n\n`;
     
     if (data.summary) {
-      text += `PROFESSIONAL SUMMARY\n${data.summary}\n\n`;
+      text += `PROFESSIONAL SUMMARY\n${stripMarkdown(data.summary)}\n\n`;
     }
 
     if (data.experience?.length > 0) {
       text += `PROFESSIONAL EXPERIENCE\n`;
       data.experience.forEach(exp => {
-        text += `${exp.company}\n`;
-        text += `${exp.position} | ${exp.startDate} - ${exp.endDate}\n`;
-        if (exp.location) text += `${exp.location}\n`;
+        text += `${stripMarkdown(exp.company)}\n`;
+        text += `${stripMarkdown(exp.position)} | ${exp.startDate} - ${exp.endDate}\n`;
+        if (exp.location) text += `${stripMarkdown(exp.location)}\n`;
         exp.highlights.forEach(h => {
-          text += `- ${h.replace(/\*\*/g, "")}\n`;
+          text += `- ${stripMarkdown(h)}\n`;
         });
         text += `\n`;
       });
@@ -545,9 +597,9 @@ export default function App() {
     if (data.education?.length > 0) {
       text += `EDUCATION\n`;
       data.education.forEach(edu => {
-        text += `${edu.school}\n`;
-        text += `${edu.degree} | ${edu.graduationDate}\n`;
-        if (edu.location) text += `${edu.location}\n`;
+        text += `${stripMarkdown(edu.school)}\n`;
+        text += `${stripMarkdown(edu.degree)} | ${edu.graduationDate}\n`;
+        if (edu.location) text += `${stripMarkdown(edu.location)}\n`;
         text += `\n`;
       });
     }
@@ -645,7 +697,7 @@ export default function App() {
         let localCvs: CV[] = [];
         if (localCvsStr) {
           try {
-            localCvs = JSON.parse(localCvsStr);
+            localCvs = JSON.parse(localCvsStr).map((c: CV) => ({ ...c, content: normalizeCVData(c.content) }));
             localCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
             setCvs(localCvs);
           } catch (e) {
@@ -658,23 +710,32 @@ export default function App() {
             // Then sync with Firestore if logged in with Google
             const q = query(collection(db, "cvs"), where("userId", "==", user.uid));
             unsubscribe = onSnapshot(q, (snapshot) => {
-              const firestoreCvs = snapshot.docs.map(doc => doc.data() as CV);
+              const firestoreCvs = snapshot.docs.map(doc => {
+                const c = doc.data() as CV;
+                return { ...c, content: normalizeCVData(c.content) };
+              });
               firestoreCvs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
               
-              setCvs(prev => {
-                const merged = [...firestoreCvs];
-                prev.forEach(local => {
-                  if (!merged.some(f => f.id === local.id)) {
-                    const isCloudCv = local.userId === user.uid;
-                    if (!isCloudCv) {
-                      merged.push(local);
-                    }
+              setCvs(() => {
+                const localCvsRaw = localStorage.getItem("cv_crafter_cvs");
+                let localCvsList: CV[] = [];
+                if (localCvsRaw) {
+                  try {
+                    localCvsList = JSON.parse(localCvsRaw).map((c: CV) => ({ ...c, content: normalizeCVData(c.content) }));
+                  } catch (e) {
+                    console.error("Failed to parse local storage in sync:", e);
                   }
-                });
+                }
                 
-                const finalCvs = merged.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                const firestoreIds = new Set(firestoreCvs.map(f => f.id));
+                // Only keep local items if they were not deleted from local storage and not already in Firestore
+                const remainingLocal = localCvsList.filter(l => !l.userId && !firestoreIds.has(l.id));
+                
+                const finalCvs = [...firestoreCvs, ...remainingLocal].sort(
+                  (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                );
+                
                 localStorage.setItem("cv_crafter_cvs", JSON.stringify(finalCvs));
-                
                 return finalCvs;
               });
             }, (error) => {
@@ -735,6 +796,26 @@ export default function App() {
     }
   };
 
+  const handleConfirmCompanyPosition = () => {
+    if (!pendingCvForNaming) return;
+    const comp = companyPosInput.company.trim();
+    const pos = companyPosInput.position.trim();
+    if (!comp || !pos) return;
+
+    const finalTitle = `${comp} - ${pos} - ${companyPosInput.baseCvTitle}`;
+    const finalCv: CV = {
+      ...pendingCvForNaming,
+      title: finalTitle
+    };
+
+    setPendingOptimizedCv(finalCv);
+    setPendingCvForNaming(null);
+    setShowCompanyPosModal(false);
+    setIsDiffMode(true);
+    setJobDesc("");
+    setJobUrl("");
+  };
+
   const renderModals = () => (
     <>
       <AuthModal
@@ -756,6 +837,315 @@ export default function App() {
         }}
         showToast={showToast}
       />
+
+      {/* Modal for Prompting Missing Target Company & Position */}
+      <AnimatePresence>
+        {showCompanyPosModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => setShowCompanyPosModal(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl overflow-hidden border border-slate-100"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+                    <Briefcase className="text-indigo-600 w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">Name Optimized CV</h2>
+                    <p className="text-slate-500 text-xs">Specify target company & position</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowCompanyPosModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+                Could not automatically detect both the target company and position name. Please provide them to name your optimized CV.
+              </p>
+
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Target Company Name <span className="text-rose-500">*</span>
+                  </label>
+                  <Input 
+                    placeholder="e.g. Fishlabs GmbH, Google" 
+                    value={companyPosInput.company}
+                    onChange={(e) => setCompanyPosInput(prev => ({ ...prev, company: e.target.value }))}
+                    className="h-11 rounded-xl"
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Target Position Name <span className="text-rose-500">*</span>
+                  </label>
+                  <Input 
+                    placeholder="e.g. Senior Producer, Product Manager" 
+                    value={companyPosInput.position}
+                    onChange={(e) => setCompanyPosInput(prev => ({ ...prev, position: e.target.value }))}
+                    className="h-11 rounded-xl"
+                  />
+                </div>
+
+                {companyPosInput.company.trim() && companyPosInput.position.trim() && (
+                  <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-xs">
+                    <span className="font-bold text-indigo-700 block mb-0.5">Title Preview:</span>
+                    <span className="font-medium text-slate-800 break-words">
+                      {companyPosInput.company.trim()} - {companyPosInput.position.trim()} - {companyPosInput.baseCvTitle}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setShowCompanyPosModal(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  variant="primary" 
+                  className="flex-1 rounded-xl"
+                  disabled={!companyPosInput.company.trim() || !companyPosInput.position.trim()}
+                  onClick={handleConfirmCompanyPosition}
+                >
+                  Confirm & Save
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Custom Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deleteConfirmTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => setDeleteConfirmTarget(null)}
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl border border-slate-100 flex flex-col gap-6 z-10"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-rose-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-6 h-6 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900 leading-tight">Delete Resume</h3>
+                  <p className="text-xs text-slate-500 font-medium">This action cannot be undone.</p>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-600 leading-relaxed">
+                Are you sure you want to delete <strong className="text-slate-900">"{deleteConfirmTarget.title}"</strong>
+                {deleteConfirmTarget.isBaseWithChildren ? (
+                  <span className="text-rose-600 font-semibold"> and all its optimized versions</span>
+                ) : null}
+                ?
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setDeleteConfirmTarget(null)}
+                  className="rounded-xl px-5 py-2 text-slate-600 hover:bg-slate-100 font-semibold"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  variant="primary" 
+                  onClick={() => {
+                    const targetId = deleteConfirmTarget.id;
+                    setDeleteConfirmTarget(null);
+                    handleDelete(targetId);
+                  }}
+                  className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl px-5 py-2 font-semibold shadow-lg shadow-rose-200"
+                >
+                  Delete
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Job Match Analysis Modal */}
+      <AnimatePresence>
+        {showMatchRateModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+              onClick={() => setShowMatchRateModal(false)}
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative bg-white rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl border border-slate-100 flex flex-col gap-6 z-10 overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+                    <Target className="w-6 h-6 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-extrabold text-slate-900 leading-tight">Job Match Score & Analysis</h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {activeMatchRateCv?.content.targetPosition || activeMatchRateCv?.content.targetCompany ? (
+                        <span className="text-indigo-600 font-semibold">
+                          {[activeMatchRateCv?.content.targetPosition, activeMatchRateCv?.content.targetCompany].filter(Boolean).join(" @ ")}
+                        </span>
+                      ) : (
+                        <span>Real-time evaluation against target job requirements</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setShowMatchRateModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-xl">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Score comparison grid */}
+              {(() => {
+                const targetCv = activeMatchRateCv || currentCv;
+                const matchData = targetCv?.content.matchRate;
+                if (!matchData) {
+                  return (
+                    <div className="p-6 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center">
+                      <Target className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-xs font-bold text-slate-500">No Job Match Score Available</p>
+                      <p className="text-[11px] text-slate-400 mt-1 max-w-xs mx-auto">Tailor this CV to a job posting to generate an uninflated match score analysis.</p>
+                      <Button 
+                        size="sm"
+                        className="mt-4 rounded-xl bg-indigo-600 text-white font-bold text-xs px-4"
+                        onClick={() => {
+                          setShowMatchRateModal(false);
+                          setShowJobModal(true);
+                        }}
+                      >
+                        Tailor for Job Now
+                      </Button>
+                    </div>
+                  );
+                }
+
+                const scoreColor = matchData.optimized >= 8 
+                  ? "emerald" 
+                  : matchData.optimized >= 5 
+                  ? "amber" 
+                  : "rose";
+
+                return (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col items-center justify-center text-center">
+                        <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">Original CV Fit</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black text-slate-500">{matchData.original}</span>
+                          <span className="text-xs font-bold text-slate-400">/ 10</span>
+                        </div>
+                        <span className="text-[10px] font-medium text-slate-400 mt-1">Before tailoring</span>
+                      </div>
+
+                      <div className={cn(
+                        "border rounded-2xl p-4 flex flex-col items-center justify-center text-center relative overflow-hidden",
+                        scoreColor === "emerald" ? "bg-emerald-50/70 border-emerald-200 text-emerald-950" :
+                        scoreColor === "amber" ? "bg-amber-50/70 border-amber-200 text-amber-950" :
+                        "bg-rose-50/70 border-rose-200 text-rose-950"
+                      )}>
+                        <Sparkles className={cn(
+                          "w-4 h-4 absolute top-2 right-2",
+                          scoreColor === "emerald" ? "text-emerald-500" :
+                          scoreColor === "amber" ? "text-amber-500" : "text-rose-500"
+                        )} />
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-70 mb-1">Tailored Match Score</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className={cn(
+                            "text-3xl font-black",
+                            scoreColor === "emerald" ? "text-emerald-600" :
+                            scoreColor === "amber" ? "text-amber-600" : "text-rose-600"
+                          )}>
+                            {matchData.optimized}
+                          </span>
+                          <span className="text-xs font-bold opacity-60">/ 10</span>
+                        </div>
+                        <span className="text-[10px] font-bold mt-1">
+                          {scoreColor === "emerald" ? "Strong Fit" : scoreColor === "amber" ? "Moderate Fit" : "Gaps Remain"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Honest Feedback Box */}
+                    <div className="bg-slate-900 text-slate-100 rounded-2xl p-4 border border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">Uninflated Evaluation & Gap Analysis</span>
+                      </div>
+                      <p className="text-xs leading-relaxed text-slate-300">
+                        {matchData.explanation}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2">
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setShowMatchRateModal(false)}
+                        className="rounded-xl px-5 py-2 text-slate-600 hover:bg-slate-100 font-semibold text-xs"
+                      >
+                        Close
+                      </Button>
+                      <Button 
+                        variant="primary" 
+                        onClick={() => {
+                          setShowMatchRateModal(false);
+                          setShowJobModal(true);
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl px-5 py-2 font-bold text-xs shadow-md shadow-indigo-100 flex items-center gap-2"
+                      >
+                        <Wand2 className="w-4 h-4" />
+                        Re-Tailor for Job
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {showCoverLetterModal && currentCv && (
+        <CoverLetterModal
+          isOpen={showCoverLetterModal}
+          onClose={() => setShowCoverLetterModal(false)}
+          cv={currentCv.content}
+          showToast={showToast}
+        />
+      )}
     </>
   );
 
@@ -909,7 +1299,49 @@ export default function App() {
     }
   };
 
-  const runFinalOptimization = async (additionalSkills: Array<{ skill: string, placement: "skills" | string }>) => {
+  const resolveCompanyAndPosition = (optimized: CVData, jobDescText: string, jobUrlText: string) => {
+    let company = (optimized.targetCompany || "").trim();
+    let position = (optimized.targetPosition || "").trim();
+
+    const isInvalid = (val: string) => {
+      if (!val) return true;
+      const lower = val.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!lower) return true;
+      return [
+        "unknown", "na", "none", "company", "position", "targetcompany",
+        "targetposition", "notprovided", "notspecified", "job", "role",
+        "companyname", "positionname", "undefined", "null", "tbd"
+      ].includes(lower);
+    };
+
+    if (isInvalid(company)) company = "";
+    if (isInvalid(position)) position = "";
+
+    // Fallback 1: suggestedTitle (e.g., "Senior Producer - Fishlabs GmbH" or "Senior Producer at Fishlabs GmbH")
+    if ((!company || !position) && optimized.suggestedTitle) {
+      const parts = optimized.suggestedTitle.split(/\s+at\s+|\s+-\s+/i);
+      if (parts.length >= 2) {
+        if (!position && !isInvalid(parts[0])) position = parts[0].trim();
+        if (!company && !isInvalid(parts[1])) company = parts[1].trim();
+      }
+    }
+
+    // Fallback 2: jobUrl parsing
+    if ((!company || !position) && jobUrlText) {
+      const match = jobUrlText.match(/(?:view|jobs)\/([a-z0-9\-]+)/i);
+      if (match && match[1]) {
+        const parts = match[1].split("-at-");
+        if (parts.length === 2) {
+          if (!position && !isInvalid(parts[0])) position = parts[0].replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()).trim();
+          if (!company && !isInvalid(parts[1])) company = parts[1].replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()).trim();
+        }
+      }
+    }
+
+    return { company, position };
+  };
+
+  const runFinalOptimization = async (additionalSkills: Array<{ skill: string, placement: "skills" | string, company?: string, position?: string }>) => {
     if (!currentCv) return;
     setIsOptimizing(true);
     setError(null);
@@ -940,14 +1372,24 @@ export default function App() {
       optimized.customLinks = mergedLinks;
       optimized.linksPlacement = currentCv.content.linksPlacement || "header";
 
-      const baseName = currentCv.content.personalInfo?.fullName || currentCv.title.split(" - ")[0];
-      const newTitle = optimized.suggestedTitle 
-        ? `${baseName} - ${optimized.suggestedTitle.replace(" - ", " at ")}`
-        : `${baseName} - Optimized`;
+      // Root Base CV Title
+      let baseCvTitle = currentCv.title;
+      if (currentCv.parent_id) {
+        const rootCv = cvs.find(c => c.id === currentCv.parent_id);
+        if (rootCv && rootCv.title) {
+          baseCvTitle = rootCv.title;
+        }
+      }
+
+      const { company, position } = resolveCompanyAndPosition(
+        optimized,
+        jobDesc,
+        optimizeTab === "link" ? jobUrl : ""
+      );
 
       const newCv: CV = {
         id: generateId(),
-        title: newTitle,
+        title: "",
         content: optimized,
         template: currentCv.template,
         updated_at: new Date().toISOString(),
@@ -955,13 +1397,28 @@ export default function App() {
         userId: user?.uid
       };
       
-      setPendingOptimizedCv(newCv);
-      setIsDiffMode(true);
-      setShowJobModal(false);
-      setShowSkillsModal(false);
-      setJobDesc("");
-      setJobUrl("");
-      playChime();
+      if (company && position) {
+        newCv.title = `${company} - ${position} - ${baseCvTitle}`;
+        setPendingOptimizedCv(newCv);
+        setIsDiffMode(true);
+        setShowJobModal(false);
+        setShowSkillsModal(false);
+        setJobDesc("");
+        setJobUrl("");
+        playChime();
+      } else {
+        // Ask user for company and/or position
+        setPendingCvForNaming(newCv);
+        setCompanyPosInput({
+          company: company || "",
+          position: position || "",
+          baseCvTitle
+        });
+        setShowCompanyPosModal(true);
+        setShowJobModal(false);
+        setShowSkillsModal(false);
+        playChime();
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Failed to optimize CV. Please try again.");
@@ -1003,6 +1460,9 @@ export default function App() {
     try {
       const updatedCvs = [pendingOptimizedCv, ...cvs.filter(c => c.id !== pendingOptimizedCv.id)];
       await saveCvsLocally(updatedCvs);
+      if (user) {
+        await saveCvToFirestore(pendingOptimizedCv);
+      }
       
       setCurrentCv(pendingOptimizedCv);
       setPendingOptimizedCv(null);
@@ -1103,14 +1563,32 @@ export default function App() {
   };
 
   const handleDelete = async (id: string) => {
-    // Optimistically update local state for immediate feedback
-    const updatedCvs = cvs.filter(c => c.id !== id);
+    // Collect ID to delete and any child optimized CVs linked to it
+    const idsToDelete = [id, ...cvs.filter(c => c.parent_id === id).map(c => c.id)];
+    const updatedCvs = cvs.filter(c => !idsToDelete.includes(c.id));
+    
+    // Save updated list locally first
     await saveCvsLocally(updatedCvs);
+    
+    // Reset currentCv if it was one of the deleted items
+    if (currentCv && idsToDelete.includes(currentCv.id)) {
+      const remaining = updatedCvs.find(c => !c.parent_id) || updatedCvs[0] || null;
+      setCurrentCv(remaining);
+      if (!remaining && view === "editor") {
+        setView("dashboard");
+      }
+    }
     
     if (user) {
       try {
-        await deleteDoc(doc(db, "cvs", id));
-        showToast("CV deleted from cloud");
+        for (const deleteId of idsToDelete) {
+          try {
+            await deleteDoc(doc(db, "cvs", deleteId));
+          } catch (err) {
+            console.warn(`Cloud doc ${deleteId} delete notice:`, err);
+          }
+        }
+        showToast("CV deleted");
       } catch (error) {
         console.error("Failed to delete from cloud:", error);
         handleFirestoreError(error, OperationType.DELETE, `cvs/${id}`);
@@ -1272,11 +1750,14 @@ export default function App() {
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="opacity-0 group-hover:opacity-100 transition-opacity" 
-                              onClick={() => {
-                                if (window.confirm("Are you sure you want to delete this CV? This action cannot be undone.")) {
-                                  handleDelete(cv.id);
-                                }
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors" 
+                              title="Delete CV"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteConfirmTarget({
+                                  id: cv.id,
+                                  title: cv.title || "Untitled CV",
+                                });
                               }}
                             >
                               <Trash2 className="w-5 h-5 text-rose-500" />
@@ -1339,11 +1820,16 @@ export default function App() {
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="opacity-0 group-hover:opacity-100 transition-opacity" 
-                              onClick={() => {
-                                if (window.confirm("Are you sure you want to delete this CV and all its optimized versions? This action cannot be undone.")) {
-                                  handleDelete(baseCv.id);
-                                }
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors" 
+                              title="Delete Base CV and Optimizations"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const hasOptimized = cvs.some(c => c.parent_id === baseCv.id);
+                                setDeleteConfirmTarget({
+                                  id: baseCv.id,
+                                  title: baseCv.title || "Base CV",
+                                  isBaseWithChildren: hasOptimized,
+                                });
                               }}
                             >
                               <Trash2 className="w-5 h-5 text-rose-500" />
@@ -1367,51 +1853,83 @@ export default function App() {
                       {/* Optimized CVs - Grid of smaller cards */}
                       <div className="flex-1 w-full">
                         {optimized.length > 0 ? (
-                          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
                             {optimized.map((optCv) => (
                               <motion.div 
                                 key={optCv.id}
                                 whileHover={{ scale: 1.02, y: -2 }}
-                                className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-4 shadow-sm hover:shadow-lg transition-all relative overflow-hidden group aspect-square justify-between"
+                                onClick={() => { setCurrentCv(optCv); setView("editor"); }}
+                                className="bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl p-5 flex flex-col justify-between gap-4 shadow-sm hover:shadow-lg transition-all relative group cursor-pointer"
                               >
-                                <div className="absolute top-0 right-0 px-2 py-1 bg-emerald-500 text-[8px] font-black text-white uppercase tracking-widest rounded-bl-lg">
+                                <div className="absolute top-0 right-0 px-2.5 py-1 bg-emerald-500 text-[9px] font-black text-white uppercase tracking-widest rounded-bl-xl shadow-xs">
                                   Optimized
                                 </div>
                                 
-                                <div className="flex justify-between items-start">
-                                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center">
+                                <div className="flex justify-between items-start pt-1">
+                                  <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center border border-emerald-100">
                                     <Wand2 className="text-emerald-600 w-5 h-5" />
                                   </div>
                                   <Button 
                                     variant="ghost" 
                                     size="sm" 
-                                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" 
-                                    onClick={() => {
-                                      if (window.confirm("Are you sure you want to delete this optimized CV?")) {
-                                        handleDelete(optCv.id);
-                                      }
+                                    className="h-8 w-8 p-0 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors z-10" 
+                                    title="Delete Optimized CV"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeleteConfirmTarget({
+                                        id: optCv.id,
+                                        title: optCv.title || "Optimized CV",
+                                      });
                                     }}
                                   >
                                     <Trash2 className="w-4 h-4 text-rose-500" />
                                   </Button>
                                 </div>
 
-                                <div className="space-y-1">
-                                  <h3 className="font-bold text-sm text-slate-900 line-clamp-2 leading-snug">{optCv.title}</h3>
-                                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter italic">
-                                    {new Date(optCv.updated_at).toLocaleDateString()}
+                                <div className="space-y-2 flex-1">
+                                  <h3 className="font-bold text-base text-slate-900 line-clamp-2 leading-snug">{optCv.title}</h3>
+                                  <p className="text-[11px] text-slate-400 font-medium uppercase tracking-tighter italic">
+                                    Updated {new Date(optCv.updated_at).toLocaleDateString()}
                                   </p>
+                                  {optCv.content?.matchRate && (
+                                    <button 
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setActiveMatchRateCv(optCv);
+                                        setShowMatchRateModal(true);
+                                      }}
+                                      className={cn(
+                                        "px-2.5 py-1 rounded-lg text-[11px] font-extrabold border cursor-pointer hover:scale-105 transition-transform flex items-center gap-1.5 w-max mt-1.5 shadow-xs",
+                                        optCv.content.matchRate.optimized >= 8
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : optCv.content.matchRate.optimized >= 5
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : "bg-rose-50 text-rose-700 border-rose-200"
+                                      )}
+                                      title="Click to view full Job Match Analysis"
+                                    >
+                                      <Target className="w-3.5 h-3.5 shrink-0" />
+                                      <span>Match: {optCv.content.matchRate.optimized}/10</span>
+                                    </button>
+                                  )}
                                 </div>
 
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="w-full text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-lg py-2 border border-transparent hover:border-indigo-100"
-                                  onClick={() => { setCurrentCv(optCv); setView("editor"); }}
-                                >
-                                  <Eye className="w-3 h-3 mr-2" />
-                                  Open
-                                </Button>
+                                <div className="pt-2">
+                                  <Button 
+                                    variant="primary" 
+                                    size="sm" 
+                                    className="w-full text-xs font-bold py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setCurrentCv(optCv);
+                                      setView("editor");
+                                    }}
+                                  >
+                                    <Eye className="w-4 h-4 shrink-0" />
+                                    <span>View & Edit</span>
+                                  </Button>
+                                </div>
                               </motion.div>
                             ))}
                           </div>
@@ -1797,6 +2315,39 @@ export default function App() {
               Last saved {new Date(currentCv.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+          {currentCv?.content?.matchRate ? (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => {
+                setActiveMatchRateCv(currentCv);
+                setShowMatchRateModal(true);
+              }}
+              className={cn(
+                "rounded-xl px-3.5 py-2 text-xs font-extrabold border transition-all flex items-center gap-1.5 shadow-xs",
+                currentCv.content.matchRate.optimized >= 8 
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
+                  : currentCv.content.matchRate.optimized >= 5 
+                  ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100" 
+                  : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+              )}
+              title="Click to view honest Job Match Score & Gap Analysis"
+            >
+              <Target className="w-4 h-4" />
+              <span>Match: {currentCv.content.matchRate.optimized}/10</span>
+            </Button>
+          ) : (
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setShowJobModal(true)}
+              className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 rounded-xl px-3.5 py-2 text-xs font-bold"
+              title="Tailor your CV to a target job to calculate a realistic match score"
+            >
+              <Target className="w-4 h-4 mr-1.5 text-indigo-600" />
+              Check Job Match
+            </Button>
+          )}
           {!currentCv?.parent_id && (
             <Button variant="outline" onClick={() => setShowJobModal(true)}>
               <Wand2 className="w-4 h-4 mr-2 text-indigo-600" />
@@ -1807,6 +2358,38 @@ export default function App() {
             <Scan className="w-4 h-4 mr-2 text-indigo-600" />
             ATS Scan
           </Button>
+          {currentCv && (
+            <Button 
+              variant="outline" 
+              onClick={() => setShowCoverLetterModal(true)}
+              className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300 rounded-xl px-3.5 py-2 text-xs font-bold"
+              title="Generate a cover letter for a target company grounded in your open CV"
+            >
+              <FileText className="w-4 h-4 mr-1.5 text-indigo-600" />
+              Cover Letter
+            </Button>
+          )}
+          {currentCv && (
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300 rounded-xl px-3 text-xs font-bold"
+              onClick={() => {
+                if (!currentCv) return;
+                const isOpt = !!currentCv.parent_id;
+                const hasOptimized = cvs.some(c => c.parent_id === currentCv.id);
+                setDeleteConfirmTarget({
+                  id: currentCv.id,
+                  title: currentCv.title || "Resume",
+                  isBaseWithChildren: !isOpt && hasOptimized,
+                });
+              }}
+              title="Delete this CV"
+            >
+              <Trash2 className="w-4 h-4 mr-1.5 text-rose-500" />
+              Delete
+            </Button>
+          )}
           <button 
             onClick={handleSave}
             disabled={isSaving}
@@ -2642,10 +3225,10 @@ export default function App() {
                     className="h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-lg shadow-emerald-100"
                     onClick={() => {
                       const skill = missingSkills[currentSkillIndex];
-                      if (skill.suggestedPlacement === "experience" && currentCv?.content.experience.length) {
+                      if (currentCv?.content.experience && currentCv.content.experience.length > 0) {
                         setSelectingExperienceFor(skill.skill);
                       } else {
-                        const newConfirmed = [...confirmedSkills, { skill: skill.skill, placement: "skills" }];
+                        const newConfirmed = [...confirmedSkills, { skill: skill.skill, placement: "skills" as const }];
                         setConfirmedSkills(newConfirmed);
                         if (currentSkillIndex < missingSkills.length - 1) {
                           setCurrentSkillIndex(prev => prev + 1);
@@ -2670,15 +3253,23 @@ export default function App() {
                     exit={{ opacity: 0, y: 10 }}
                     className="absolute inset-0 bg-white rounded-3xl p-8 flex flex-col z-10"
                   >
-                    <h3 className="text-lg font-bold mb-2">Where did you use this?</h3>
-                    <p className="text-slate-500 text-sm mb-6">Select the position where you used **{selectingExperienceFor}**.</p>
+                    <h3 className="text-lg font-bold mb-1 text-slate-900">Where did you apply this skill?</h3>
+                    <p className="text-slate-500 text-xs mb-4">Select the role where you used <strong className="text-indigo-600 font-bold">{selectingExperienceFor}</strong>.</p>
                     
-                    <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                       {currentCv?.content.experience.map((exp, idx) => (
                         <button
                           key={idx}
                           onClick={() => {
-                            const newConfirmed = [...confirmedSkills, { skill: selectingExperienceFor, placement: exp.company }];
+                            const newConfirmed = [
+                              ...confirmedSkills, 
+                              { 
+                                skill: selectingExperienceFor, 
+                                placement: `${exp.position} at ${exp.company}`,
+                                company: exp.company,
+                                position: exp.position
+                              }
+                            ];
                             setConfirmedSkills(newConfirmed);
                             setSelectingExperienceFor(null);
                             if (currentSkillIndex < missingSkills.length - 1) {
@@ -2688,15 +3279,15 @@ export default function App() {
                               runFinalOptimization(newConfirmed);
                             }
                           }}
-                          className="w-full p-4 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
+                          className="w-full p-3.5 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
                         >
-                          <div className="font-bold text-slate-900 group-hover:text-indigo-700">{exp.position}</div>
-                          <div className="text-xs text-slate-500">{exp.company}</div>
+                          <div className="font-bold text-slate-900 group-hover:text-indigo-700 text-sm">{exp.position}</div>
+                          <div className="text-xs text-slate-500">{exp.company} • {exp.startDate} – {exp.endDate}</div>
                         </button>
                       ))}
                       <button
                         onClick={() => {
-                          const newConfirmed = [...confirmedSkills, { skill: selectingExperienceFor, placement: "skills" }];
+                          const newConfirmed = [...confirmedSkills, { skill: selectingExperienceFor, placement: "skills" as const }];
                           setConfirmedSkills(newConfirmed);
                           setSelectingExperienceFor(null);
                           if (currentSkillIndex < missingSkills.length - 1) {
@@ -2706,16 +3297,16 @@ export default function App() {
                             runFinalOptimization(newConfirmed);
                           }
                         }}
-                        className="w-full p-4 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
+                        className="w-full p-3.5 text-left bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group"
                       >
-                        <div className="font-bold text-slate-900 group-hover:text-indigo-700">Just add to Skills section</div>
-                        <div className="text-xs text-slate-500">General list</div>
+                        <div className="font-bold text-slate-900 group-hover:text-indigo-700 text-sm">Just add to Skills section</div>
+                        <div className="text-xs text-slate-500">Add to general skills list only</div>
                       </button>
                     </div>
                     
                     <Button 
                       variant="ghost" 
-                      className="mt-4"
+                      className="mt-3"
                       onClick={() => setSelectingExperienceFor(null)}
                     >
                       Back

@@ -1,5 +1,251 @@
 import { jsPDF } from "jspdf";
-import { CVData } from "./gemini";
+import { CVData, formatATSDate } from "./gemini";
+
+export interface MarkdownToken {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  strikethrough?: boolean;
+  code?: boolean;
+  link?: string;
+}
+
+export interface MarkdownWord {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+  strikethrough?: boolean;
+  code?: boolean;
+  link?: string;
+}
+
+export interface RenderMarkdownOptions {
+  baseFont?: string;
+  baseStyle?: "normal" | "bold" | "italic" | "bolditalic";
+  fontSize?: number;
+  color?: [number, number, number];
+  bullet?: string;
+  bulletColor?: [number, number, number];
+  pageMargin?: number;
+  maxY?: number;
+  onNewPage?: () => void;
+}
+
+/**
+ * Robust markdown tokenizer supporting links, bold+italic, bold, italic (both _ and *),
+ * strikethrough, and inline code.
+ */
+export function tokenizeMarkdown(text: string): MarkdownToken[] {
+  if (!text) return [];
+  const tokens: MarkdownToken[] = [];
+  
+  // Master regex matching inline markdown elements by precedence
+  const masterRegex = /(\[(?<linkText>[^\]]+)\]\((?<linkUrl>[^)]+)\))|(?:\*\*\*(?<bi1>.+?)\*\*\*)|(?:\*\*_(?<bi2>.+?)_\*\*)|(?:_\*\*(?<bi3>.+?)\*\*_)|(?:___(?<bi4>[^_]+)___)|(?:\*\*(?<b1>.+?)\*\*)|(?:(?<!\w)__(?<b2>[^_]+)__(?!\w))|(?:\*(?<i1>[^*]+)\*)|(?:(?<!\w)_(?<i2>[^_]+)_(?!\w))|(?:~~(?<strike>[^~]+)~~)|(?:`(?<code>[^`]+)`)/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = masterRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push({ text: text.slice(lastIndex, match.index), bold: false, italic: false });
+    }
+
+    const groups = match.groups || {};
+    if (groups.linkText && groups.linkUrl) {
+      tokens.push({ text: groups.linkText, link: groups.linkUrl, bold: false, italic: false });
+    } else if (groups.bi1 || groups.bi2 || groups.bi3 || groups.bi4) {
+      const biText = groups.bi1 || groups.bi2 || groups.bi3 || groups.bi4;
+      tokens.push({ text: biText, bold: true, italic: true });
+    } else if (groups.b1 || groups.b2) {
+      const bText = groups.b1 || groups.b2;
+      tokens.push({ text: bText, bold: true, italic: false });
+    } else if (groups.i1 || groups.i2) {
+      const iText = groups.i1 || groups.i2;
+      tokens.push({ text: iText, bold: false, italic: true });
+    } else if (groups.strike) {
+      tokens.push({ text: groups.strike, strikethrough: true, bold: false, italic: false });
+    } else if (groups.code) {
+      tokens.push({ text: groups.code, code: true, bold: false, italic: false });
+    }
+
+    lastIndex = masterRegex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    tokens.push({ text: text.slice(lastIndex), bold: false, italic: false });
+  }
+
+  return tokens;
+}
+
+/**
+ * Strips all markdown syntax leaving clean human-readable text for ATS / clipboard export.
+ */
+export function stripMarkdown(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/(?:\*\*\*|___|\*\*_\b|_<\*\*|\b_\*\*|\*\*_)(.+?)(?:\*\*\*|___|_\*\*|\*\*_)/g, "$1")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/(?<!\w)__(.+?)__(?!\w)/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
+/**
+ * Converts formatted markdown tokens into individual printable words with trailing spaces,
+ * enabling proper line wrapping while preserving exact styling flags.
+ */
+export function processTokensToWords(tokens: MarkdownToken[]): MarkdownWord[] {
+  const words: MarkdownWord[] = [];
+  let pendingSpace = "";
+
+  tokens.forEach((token) => {
+    const segments = token.text.match(/\S+|\s+/g) || [];
+    segments.forEach((seg) => {
+      if (/^\s+$/.test(seg)) {
+        if (words.length > 0) {
+          words[words.length - 1].text += seg;
+        } else {
+          pendingSpace += seg;
+        }
+      } else {
+        words.push({
+          text: pendingSpace + seg,
+          bold: !!token.bold,
+          italic: !!token.italic,
+          strikethrough: !!token.strikethrough,
+          code: !!token.code,
+          link: token.link,
+        });
+        pendingSpace = "";
+      }
+    });
+  });
+
+  return words;
+}
+
+/**
+ * Core multi-style markdown renderer for jsPDF. Renders text with bold, italic,
+ * links, code, strikethrough, and clean bullet points with automatic line wrapping and pagination.
+ */
+export const renderMarkdownBlock = (
+  doc: jsPDF,
+  text: string,
+  x: number,
+  currentY: number,
+  maxWidth: number,
+  options: RenderMarkdownOptions = {}
+): number => {
+  if (!text) return currentY;
+
+  const baseFont = options.baseFont || "helvetica";
+  const baseStyle = options.baseStyle || "normal";
+  const fontSize = options.fontSize || 10;
+  const color = options.color || [50, 50, 50];
+  const bullet = options.bullet || "";
+  const bulletColor = options.bulletColor || [79, 70, 229];
+  const pageMargin = options.pageMargin ?? 20;
+  const maxY = options.maxY ?? 280;
+  const onNewPage = options.onNewPage || (() => { doc.addPage(); });
+
+  const lineHeight = fontSize * 0.46; // mm
+  const rawLines = text.split("\n");
+  let localY = currentY;
+
+  rawLines.forEach((rawLine, lineIdx) => {
+    if (!rawLine.trim()) {
+      localY += lineHeight * 0.7;
+      if (localY > maxY) {
+        onNewPage();
+        localY = pageMargin;
+      }
+      return;
+    }
+
+    const tokens = tokenizeMarkdown(rawLine);
+    const lineWords = processTokensToWords(tokens);
+    if (lineWords.length === 0) return;
+
+    // Render bullet only on the first line of the markdown block
+    if (bullet && lineIdx === 0) {
+      doc.setFont(baseFont, "bold");
+      doc.setFontSize(fontSize);
+      doc.setTextColor(bulletColor[0], bulletColor[1], bulletColor[2]);
+      doc.text(bullet, x - 4.5, localY);
+    }
+
+    let currentLineX = x;
+    lineWords.forEach((wordObj) => {
+      const isBold = wordObj.bold || baseStyle.includes("bold");
+      const isItalic = wordObj.italic || baseStyle.includes("italic");
+      let fontStyle: "normal" | "bold" | "italic" | "bolditalic" = "normal";
+      if (isBold && isItalic) fontStyle = "bolditalic";
+      else if (isBold) fontStyle = "bold";
+      else if (isItalic) fontStyle = "italic";
+
+      const fontName = wordObj.code ? "courier" : baseFont;
+      doc.setFont(fontName, fontStyle);
+      doc.setFontSize(fontSize);
+
+      if (wordObj.link) {
+        doc.setTextColor(79, 70, 229);
+      } else if (wordObj.code) {
+        doc.setTextColor(71, 85, 105);
+      } else {
+        doc.setTextColor(color[0], color[1], color[2]);
+      }
+
+      let printText = wordObj.text;
+      if (currentLineX === x) {
+        printText = printText.trimStart();
+      }
+      let wordWidth = doc.getTextWidth(printText);
+
+      // Line wrapping check
+      if (currentLineX + wordWidth > x + maxWidth && currentLineX > x) {
+        currentLineX = x;
+        localY += lineHeight;
+        if (localY > maxY) {
+          onNewPage();
+          localY = pageMargin;
+        }
+        printText = wordObj.text.trimStart();
+        wordWidth = doc.getTextWidth(printText);
+      }
+
+      doc.text(printText, currentLineX, localY);
+
+      if (wordObj.link) {
+        doc.link(currentLineX, localY - fontSize * 0.7, wordWidth, fontSize * 0.8, { url: wordObj.link });
+        doc.setDrawColor(79, 70, 229);
+        doc.setLineWidth(0.15);
+        doc.line(currentLineX, localY + 0.3, currentLineX + wordWidth, localY + 0.3);
+      }
+
+      if (wordObj.strikethrough) {
+        doc.setDrawColor(color[0], color[1], color[2]);
+        doc.setLineWidth(0.2);
+        const strikeY = localY - fontSize * 0.12;
+        doc.line(currentLineX, strikeY, currentLineX + wordWidth, strikeY);
+      }
+
+      currentLineX += wordWidth;
+    });
+
+    localY += lineHeight;
+    if (localY > maxY) {
+      onNewPage();
+      localY = pageMargin;
+    }
+  });
+
+  return localY;
+};
 
 export const exportToSelectablePDF = (data: CVData, filename: string, template: string = "modern") => {
   try {
@@ -23,64 +269,32 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       return false;
     };
 
-    const renderMarkdownText = (text: string, x: number, currentY: number, maxWidth: number, baseFont: string = "helvetica", fontSize: number = 10, color: [number, number, number] = [50, 50, 50], bullet: string = "") => {
-      doc.setFont(baseFont, "normal");
-      doc.setFontSize(fontSize);
-      doc.setTextColor(color[0], color[1], color[2]);
-
-      const lineHeight = fontSize * 0.45; // mm (approx 1.2-1.3 line height)
-      
-      // Split by lines first to preserve manual line breaks if any
-      const rawLines = text.split("\n");
-      let localY = currentY;
-
-      rawLines.forEach((rawLine, lineIdx) => {
-        const parts = rawLine.split(/(\*\*.*?\*\*)/g);
-        
-        let lineWords: { text: string, bold: boolean }[] = [];
-        parts.forEach(part => {
-          const isBold = part.startsWith("**") && part.endsWith("**");
-          const cleanPart = isBold ? part.slice(2, -2) : part;
-          const words = cleanPart.split(" ");
-          words.forEach((w, i) => {
-            if (w || i < words.length - 1) {
-              lineWords.push({ text: w + (i === words.length - 1 ? "" : " "), bold: isBold });
-            }
-          });
-        });
-
-        // Render bullet only on the first line of the markdown block
-        if (bullet && lineIdx === 0) {
-          doc.setFont(baseFont, "normal");
-          doc.text(bullet, x - 5, localY);
-        }
-
-        let currentLineX = x;
-        lineWords.forEach((wordObj, index) => {
-          doc.setFont(baseFont, wordObj.bold ? "bold" : "normal");
-          const wordWidth = doc.getTextWidth(wordObj.text);
-
-          if (currentLineX + wordWidth > margin + maxWidth && index > 0) {
-            currentLineX = x;
-            localY += lineHeight;
-            if (localY > 280) {
-              doc.addPage();
-              localY = margin;
-            }
-          }
-
-          doc.text(wordObj.text, currentLineX, localY);
-          currentLineX += wordWidth;
-        });
-        
-        localY += lineHeight;
-        if (localY > 280) {
+    const renderMarkdownText = (
+      text: string,
+      x: number,
+      currentY: number,
+      maxWidth: number,
+      baseFont: string = "helvetica",
+      fontSize: number = 10,
+      color: [number, number, number] = [50, 50, 50],
+      bullet: string = "",
+      baseStyle: "normal" | "bold" | "italic" | "bolditalic" = "normal",
+      bulletColor?: [number, number, number]
+    ) => {
+      return renderMarkdownBlock(doc, text, x, currentY, maxWidth, {
+        baseFont,
+        baseStyle,
+        fontSize,
+        color,
+        bullet,
+        bulletColor: bulletColor || (template === "minimal" ? [148, 163, 184] : [129, 140, 248]),
+        pageMargin: margin,
+        maxY: 280,
+        onNewPage: () => {
           doc.addPage();
-          localY = margin;
-        }
+          y = margin;
+        },
       });
-
-      return localY;
     };
 
     const renderLinkedText = (text: string, x: number, currentY: number, url: string, fontSize: number) => {
@@ -219,6 +433,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       }
 
       // Education & Skills Grid
+      y += 12; // 2 line breaks vertical separation between experience section and education/skills columns
       checkPageBreak(40);
       const colWidth = (contentWidth / 2) - 5;
       const secondColX = margin + colWidth + 10;
@@ -445,7 +660,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       }
 
       // Education & Skills
-      y += 5;
+      y += 12; // 2 line breaks vertical separation between experience section and education/skills
       const colWidth = contentWidth / 2;
       
       // Education
@@ -568,7 +783,7 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
     if (data.summary) {
       text += "PROFESSIONAL SUMMARY\n";
       text += "--------------------\n";
-      text += `${data.summary}\n\n`;
+      text += `${stripMarkdown(data.summary)}\n\n`;
     }
 
     // 3. Experience
@@ -579,17 +794,23 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
       data.experience.forEach((exp) => {
         if (!exp) return;
         
-        text += `${(exp.company || "Company").toUpperCase()}\n`;
-        text += `${exp.position || "Position"}  |  ${exp.startDate || ""} - ${exp.endDate || "Present"}\n`;
+        // Consistent job structure: Job Title, Company Name, Location, Dates
+        text += `${stripMarkdown(exp.position || "Position").toUpperCase()}\n`;
+        text += `${stripMarkdown(exp.company || "Company")}\n`;
         if (exp.location) {
-          text += `${exp.location}\n`;
+          text += `${stripMarkdown(exp.location)}\n`;
         }
+        const start = formatATSDate(exp.startDate, false);
+        const end = formatATSDate(exp.endDate, true);
+        text += `${start || "Start Date"} - ${end || "Present"}\n`;
 
         if (exp.highlights && Array.isArray(exp.highlights)) {
           exp.highlights.forEach((h) => {
             if (!h) return;
-            const cleanH = String(h).replace(/\*\*/g, ""); // Remove markdown bolding
-            text += `- ${cleanH}\n`;
+            const cleanH = stripMarkdown(String(h));
+            if (cleanH) {
+              text += `- ${cleanH}\n`;
+            }
           });
         }
         text += "\n";
@@ -603,10 +824,14 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
 
       data.education.forEach((edu) => {
         if (!edu) return;
-        text += `${(edu.school || "University").toUpperCase()}\n`;
-        text += `${edu.degree || ""}${edu.graduationDate ? `  |  ${edu.graduationDate}` : ""}\n`;
+        text += `${stripMarkdown(edu.degree || "Degree").toUpperCase()}\n`;
+        text += `${stripMarkdown(edu.school || "University")}\n`;
         if (edu.location) {
-          text += `${edu.location}\n`;
+          text += `${stripMarkdown(edu.location)}\n`;
+        }
+        const gradDate = formatATSDate(edu.graduationDate, false);
+        if (gradDate) {
+          text += `${gradDate}\n`;
         }
         text += "\n";
       });
@@ -616,7 +841,8 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
     if (data.skills && data.skills.length > 0) {
       text += "SKILLS & EXPERTISE\n";
       text += "------------------\n";
-      const skillsStr = Array.isArray(data.skills) ? data.skills.join(", ") : String(data.skills);
+      const rawSkills = Array.isArray(data.skills) ? data.skills : [String(data.skills)];
+      const skillsStr = rawSkills.map(s => stripMarkdown(String(s))).join(", ");
       text += `${skillsStr}\n\n`;
     }
 
@@ -627,7 +853,7 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
       text += "----------------\n";
       bottomLinks.forEach(link => {
         if (!link || !link.title || !link.url) return;
-        text += `${link.title}: ${link.url}\n`;
+        text += `${stripMarkdown(link.title)}: ${link.url}\n`;
       });
       text += "\n";
     }
@@ -650,3 +876,51 @@ export const exportForPlatforms = (data: CVData, filename: string) => {
     alert("Failed to generate text file. Please try again or use the 'Copy ATS Text' option.");
   }
 };
+
+export const exportCoverLetterToPDF = (coverLetterText: string, filename: string = "Cover_Letter") => {
+  try {
+    const doc = new jsPDF({
+      orientation: "p",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const margin = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const contentWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    const paragraphs = coverLetterText.split(/\n\n+/);
+    paragraphs.forEach((paragraph) => {
+      if (!paragraph.trim()) return;
+
+      y = renderMarkdownBlock(
+        doc,
+        paragraph.replace(/^#+\s*/, "").trim(),
+        margin,
+        y,
+        contentWidth,
+        {
+          baseFont: "helvetica",
+          baseStyle: "normal",
+          fontSize: 10.5,
+          color: [30, 41, 59],
+          pageMargin: margin,
+          maxY: 270,
+          onNewPage: () => {
+            doc.addPage();
+            y = margin;
+          },
+        }
+      );
+      y += 4;
+    });
+
+    const cleanFilename = (filename || "Cover_Letter").replace(/[^a-zA-Z0-9_-]/g, "_");
+    doc.save(`${cleanFilename}.pdf`);
+  } catch (err) {
+    console.error("Error generating Cover Letter PDF:", err);
+    alert("Failed to export Cover Letter PDF.");
+  }
+};
+
