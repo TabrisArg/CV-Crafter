@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { CVData, formatATSDate } from "./gemini";
+import { CVData, formatATSDate, repairBrokenMarkdown } from "./gemini";
 
 export interface MarkdownToken {
   text: string;
@@ -33,10 +33,11 @@ export interface RenderMarkdownOptions {
 
 /**
  * Robust markdown tokenizer supporting links, bold+italic, bold, italic (both _ and *),
- * strikethrough, and inline code.
+ * strikethrough, and inline code. Automatically repairs broken markdown markers first.
  */
-export function tokenizeMarkdown(text: string): MarkdownToken[] {
-  if (!text) return [];
+export function tokenizeMarkdown(rawText: string): MarkdownToken[] {
+  if (!rawText) return [];
+  const text = repairBrokenMarkdown(rawText);
   const tokens: MarkdownToken[] = [];
   
   // Master regex matching inline markdown elements by precedence
@@ -81,8 +82,9 @@ export function tokenizeMarkdown(text: string): MarkdownToken[] {
 /**
  * Strips all markdown syntax leaving clean human-readable text for ATS / clipboard export.
  */
-export function stripMarkdown(text: string): string {
-  if (!text) return "";
+export function stripMarkdown(rawText: string): string {
+  if (!rawText) return "";
+  const text = repairBrokenMarkdown(rawText);
   return text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/(?:\*\*\*|___|\*\*_\b|_<\*\*|\b_\*\*|\*\*_)(.+?)(?:\*\*\*|___|_\*\*|\*\*_)/g, "$1")
@@ -92,6 +94,7 @@ export function stripMarkdown(text: string): string {
     .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
     .replace(/~~(.+?)~~/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*{2,}/g, "")
     .trim();
 }
 

@@ -34,9 +34,9 @@ import { AuthModal } from "./components/AuthModal";
 import { CoverLetterModal } from "./components/CoverLetterModal";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill, normalizeCVData } from "./lib/gemini";
+import { generateCVFromText, optimizeCVForJob, type CVData, generateCVFromMultimodal, translateCV, identifyMissingSkills, type MissingSkill, normalizeCVData, repairBrokenMarkdown } from "./lib/gemini";
 import mammoth from "mammoth";
-import { exportToSelectablePDF, exportForPlatforms, tokenizeMarkdown, stripMarkdown } from "./lib/pdfExport";
+import { exportToSelectablePDF, exportForPlatforms, tokenizeMarkdown, stripMarkdown, type MarkdownToken } from "./lib/pdfExport";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import ReactMarkdown from "react-markdown";
@@ -70,28 +70,42 @@ interface UserProfile {
 const BACKEND_URL = ""; // Use relative paths for Netlify proxying
 console.log(`[DEBUG] Backend URL: ${BACKEND_URL || "Relative (Netlify Proxy)"}`);
 
-const renderInlineMarkdown = (str: string) => {
-  if (!str) return null;
-  const tokens = tokenizeMarkdown(str);
+const renderTokens = (tokens: MarkdownToken[], darkTheme = false) => {
   return tokens.map((token, i) => {
     if (token.bold && token.italic) {
-      return <strong key={i} className="font-bold italic text-slate-900">{token.text}</strong>;
+      return (
+        <strong key={i} className={cn("font-bold italic", darkTheme ? "text-white shadow-sm" : "text-slate-900")}>
+          {token.text}
+        </strong>
+      );
     }
     if (token.bold) {
-      return <strong key={i} className="font-bold text-slate-900">{token.text}</strong>;
+      return (
+        <strong key={i} className={cn("font-bold", darkTheme ? "text-white shadow-sm" : "text-slate-900")}>
+          {token.text}
+        </strong>
+      );
     }
     if (token.italic) {
-      return <em key={i} className="italic text-slate-800">{token.text}</em>;
+      return (
+        <em key={i} className={cn("italic", darkTheme ? "text-slate-200" : "text-slate-800")}>
+          {token.text}
+        </em>
+      );
     }
     if (token.code) {
-      return <code key={i} className="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">{token.text}</code>;
+      return (
+        <code key={i} className={cn("font-mono text-xs px-1 py-0.5 rounded", darkTheme ? "bg-slate-800 text-slate-100" : "bg-slate-100 text-slate-800")}>
+          {token.text}
+        </code>
+      );
     }
     if (token.strikethrough) {
       return <span key={i} className="line-through">{token.text}</span>;
     }
     if (token.link) {
       return (
-        <a key={i} href={token.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
+        <a key={i} href={token.link} target="_blank" rel="noopener noreferrer" className={cn("underline", darkTheme ? "text-indigo-300" : "text-indigo-600")}>
           {token.text}
         </a>
       );
@@ -100,41 +114,36 @@ const renderInlineMarkdown = (str: string) => {
   });
 };
 
+const renderInlineMarkdown = (str: string, darkTheme = false) => {
+  if (!str) return null;
+  const tokens = tokenizeMarkdown(str);
+  return renderTokens(tokens, darkTheme);
+};
+
 const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?: string, className?: string }) => {
-  const components = {
-    p: ({children}: any) => <span className="inline">{children}</span>,
-    strong: ({children}: any) => <strong className="font-bold text-slate-900">{children}</strong>,
-    em: ({children}: any) => <em className="italic text-slate-800">{children}</em>,
-  };
-
-  const popupComponents = {
-    p: ({children}: any) => <span className="inline text-slate-100">{children}</span>,
-    strong: ({children}: any) => <strong className="font-bold text-white shadow-sm">{children}</strong>,
-    em: ({children}: any) => <em className="italic text-slate-200">{children}</em>,
-    li: ({children}: any) => <li className="text-slate-100">{children}</li>,
-    ul: ({children}: any) => <ul className="list-disc ml-4 text-slate-100">{children}</ul>
-  };
-
   if (!newText) return null;
 
-  const cleanOld = oldText ? stripMarkdown(oldText) : "";
-  const cleanNew = newText ? stripMarkdown(newText) : "";
+  const newTokens = tokenizeMarkdown(newText);
+  const plainNew = newTokens.map((t) => t.text).join("");
 
   // If oldText is undefined, we are not in diff mode, just render normally
   if (oldText === undefined) {
     return (
       <span className={className}>
-        <ReactMarkdown components={components}>{newText}</ReactMarkdown>
+        {renderTokens(newTokens)}
       </span>
     );
   }
 
+  const oldTokens = tokenizeMarkdown(oldText);
+  const plainOld = oldTokens.map((t) => t.text).join("");
+
   // Case 1: Pure Addition (Entirely new block in diff mode)
-  if (!cleanOld) {
+  if (!plainOld.trim()) {
     return (
       <span className={cn("relative group inline", className)}>
         <span className="text-emerald-600 bg-emerald-50/90 rounded px-1 border border-emerald-200 italic inline font-medium">
-          <ReactMarkdown components={components}>{newText}</ReactMarkdown>
+          {renderTokens(newTokens)}
         </span>
         <span className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-slate-900 text-white text-[11px] p-3 rounded-xl shadow-2xl z-50 min-w-[180px] border border-slate-700 ring-4 ring-black/10">
           <span className="flex items-center gap-2 text-emerald-400 uppercase font-black tracking-widest text-[9px]">
@@ -149,21 +158,49 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
   }
 
   // Case 2: No structural text change (ignoring markdown formatting differences)
-  if (cleanOld.toLowerCase() === cleanNew.toLowerCase()) {
+  if (plainOld.trim().toLowerCase() === plainNew.trim().toLowerCase()) {
     return (
       <span className={className}>
-        <ReactMarkdown components={components}>{newText}</ReactMarkdown>
+        {renderTokens(newTokens)}
       </span>
     );
   }
   
-  // Case 3: Modification (Granular diff)
-  const diff = diffWords(oldText, newText);
+  // Case 3: Modification (Granular diff aligned with pre-tokenized markdown spans)
+  const diff = diffWords(plainOld, plainNew);
+  let tokenIdx = 0;
+  let charOffset = 0;
+
+  const takeTokensForLength = (length: number): MarkdownToken[] => {
+    const subTokens: MarkdownToken[] = [];
+    let remaining = length;
+    while (remaining > 0 && tokenIdx < newTokens.length) {
+      const current = newTokens[tokenIdx];
+      const available = current.text.length - charOffset;
+      const take = Math.min(remaining, available);
+      if (take > 0) {
+        subTokens.push({
+          ...current,
+          text: current.text.slice(charOffset, charOffset + take),
+        });
+      }
+      remaining -= take;
+      charOffset += take;
+      if (charOffset >= current.text.length) {
+        tokenIdx++;
+        charOffset = 0;
+      }
+    }
+    return subTokens;
+  };
   
   return (
     <span className={cn("relative group inline", className)}>
       <span className="inline">
         {diff.map((part, index) => {
+          if (part.removed) return null; // Don't show removed text in main view
+          const subTokens = takeTokensForLength(part.value.length);
+
           if (part.added) {
             // Check if it's a modification (adjacent to a removal) or a pure addition within text
             const isModification = diff[index - 1]?.removed || diff[index + 1]?.removed;
@@ -178,12 +215,11 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
                     : "text-emerald-600 bg-emerald-50/90 border-emerald-200"
                 )}
               >
-                {renderInlineMarkdown(part.value)}
+                {renderTokens(subTokens)}
               </span>
             );
           }
-          if (part.removed) return null; // Don't show removed text in main view
-          return <span key={index} className="inline">{renderInlineMarkdown(part.value)}</span>;
+          return <span key={index} className="inline">{renderTokens(subTokens)}</span>;
         })}
       </span>
       
@@ -193,7 +229,7 @@ const DiffText = ({ oldText, newText, className }: { oldText?: string, newText?:
           <span>Original Version</span>
         </span>
         <span className="block leading-relaxed text-slate-100 font-medium">
-          <ReactMarkdown components={popupComponents}>{oldText}</ReactMarkdown>
+          {renderTokens(oldTokens, true)}
         </span>
         <span className="absolute -bottom-1.5 left-6 w-3 h-3 bg-slate-900 rotate-45 border-r border-b border-slate-700" />
       </span>

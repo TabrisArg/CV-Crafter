@@ -307,9 +307,163 @@ function deLoopText(text: string): string {
   return text;
 }
 
+export function repairBrokenMarkdown(text: string): string {
+  if (!text || typeof text !== "string") return text || "";
+
+  return text
+    .split("\n")
+    .map((rawLine) => {
+      let line = rawLine;
+
+      // 1. Remove empty bold markers like ****
+      line = line.replace(/\*{4,}/g, "");
+
+      // 2. Fix asymmetric triple/double or single/double asterisks around a word or short phrase
+      line = line.replace(/(?<!\*)\*{3}(?!\*)([^\s*][^*]*?[^\s*])\*{2}(?!\*)/g, "**$1**");
+      line = line.replace(/(?<!\*)\*{2}(?!\*)([^\s*][^*]*?[^\s*])\*{3}(?!\*)/g, "**$1**");
+      line = line.replace(/(?<!\*)\*(?!\*)([^\s*][^*]*?[^\s*])\*\*(?!\*)/g, "**$1**");
+      line = line.replace(/(?<!\*)\*\*(?!\*)([^\s*][^*]*?[^\s*])\*(?!\*)/g, "**$1**");
+
+      // 3. Fix spaces accidentally placed just inside bold markers: "** word**" or "**word **" -> "**word**"
+      line = line.replace(/(^|[\s([{"'])\*\*\s+([^\s*][^*]*?[^\s*])\*\*(?=$|[\s.,;:!?)}\]"'])/g, "$1**$2**");
+      line = line.replace(/(^|[\s([{"'])\*\*([^\s*][^*]*?[^\s*])\s+\*\*(?=$|[\s.,;:!?)}\]"'])/g, "$1**$2**");
+
+      // 4. Remove standalone stray ** surrounded by spaces
+      line = line.replace(/(?:^|\s)\*\*(?=\s|$)/g, (m) => (m.startsWith(" ") ? " " : ""));
+
+      // 5. Pair up valid ** delimiters and fix orphan closing (word**) or orphan opening (**word)
+      interface Marker {
+        index: number;
+        canOpen: boolean;
+        canClose: boolean;
+      }
+
+      const findMarkers = (str: string): Marker[] => {
+        const list: Marker[] = [];
+        for (let i = 0; i < str.length - 1; i++) {
+          if (str[i] === "*" && str[i + 1] === "*" && str[i - 1] !== "*" && str[i + 2] !== "*") {
+            const prev = i > 0 ? str[i - 1] : "";
+            const next = i + 2 < str.length ? str[i + 2] : "";
+            const prevIsSpace = !prev || /\s/.test(prev);
+            const nextIsSpace = !next || /\s/.test(next);
+            const prevIsOpenPunct = /^[([{"'/\-–—]$/.test(prev);
+            const nextIsClosePunct = /^[.,;:!?)}\]"'/\-–—%]$/.test(next);
+
+            const canOpen = !nextIsSpace && (prevIsSpace || prevIsOpenPunct);
+            const canClose = !prevIsSpace && (nextIsSpace || nextIsClosePunct || !prevIsOpenPunct);
+            list.push({ index: i, canOpen, canClose });
+            i++; // skip second asterisk
+          }
+        }
+        return list;
+      };
+
+      // Iterative repair pass (up to 6 times per line to resolve all orphans cleanly)
+      for (let pass = 0; pass < 6; pass++) {
+        const markers = findMarkers(line);
+        if (markers.length === 0) break;
+
+        let openMarker: Marker | null = null;
+        let modified = false;
+
+        for (let mIdx = 0; mIdx < markers.length; mIdx++) {
+          const m = markers[mIdx];
+
+          if (!openMarker) {
+            if (m.canOpen && !m.canClose) {
+              openMarker = m;
+            } else if (m.canClose && !m.canOpen) {
+              // Orphan closing ** (e.g. "Spearheaded**", "Project Management:**", "microservices**")
+              const prefix = line.slice(0, m.index);
+              const hasColon = prefix.includes(":") || line[m.index + 2] === ":";
+              const isStartColonHeader =
+                mIdx === 0 && prefix.length <= 45 && hasColon && !/[.?!]/.test(prefix);
+
+              if (isStartColonHeader) {
+                const firstNonSpace = line.search(/\S/);
+                const insertPos = firstNonSpace >= 0 ? firstNonSpace : 0;
+                line = line.slice(0, insertPos) + "**" + line.slice(insertPos);
+              } else {
+                // Find the start of the word/token right before this closing **
+                let wordStart = m.index;
+                while (wordStart > 0 && !/[\s*([{"'/]/.test(line[wordStart - 1])) {
+                  wordStart--;
+                }
+                if (wordStart < m.index) {
+                  line = line.slice(0, wordStart) + "**" + line.slice(wordStart);
+                } else {
+                  // Fallback: remove stray **
+                  line = line.slice(0, m.index) + line.slice(m.index + 2);
+                }
+              }
+              modified = true;
+              break;
+            } else {
+              // Ambiguous marker when not open -> treat as opening if followed by another marker, else orphan closing
+              if (mIdx + 1 < markers.length) {
+                openMarker = m;
+              } else {
+                let wordStart = m.index;
+                while (wordStart > 0 && !/[\s*([{"'/]/.test(line[wordStart - 1])) {
+                  wordStart--;
+                }
+                if (wordStart < m.index) {
+                  line = line.slice(0, wordStart) + "**" + line.slice(wordStart);
+                } else {
+                  line = line.slice(0, m.index) + line.slice(m.index + 2);
+                }
+                modified = true;
+                break;
+              }
+            }
+          } else {
+            // We currently have an open ** marker
+            if (m.canClose) {
+              // Valid pair closed!
+              openMarker = null;
+            } else if (m.canOpen && !m.canClose) {
+              // Hit another opening ** while previous openMarker was never closed!
+              // Close the previous openMarker at the end of its word
+              let wordEnd = openMarker.index + 2;
+              while (wordEnd < line.length && !/[\s*.,;:!?)}\]"'/]/.test(line[wordEnd])) {
+                wordEnd++;
+              }
+              if (wordEnd > openMarker.index + 2) {
+                line = line.slice(0, wordEnd) + "**" + line.slice(wordEnd);
+              } else {
+                line = line.slice(0, openMarker.index) + line.slice(openMarker.index + 2);
+              }
+              modified = true;
+              break;
+            }
+          }
+        }
+
+        if (!modified && openMarker) {
+          // Reached end of line with an unclosed opening **
+          let wordEnd = openMarker.index + 2;
+          while (wordEnd < line.length && !/[\s*.,;:!?)}\]"'/]/.test(line[wordEnd])) {
+            wordEnd++;
+          }
+          if (wordEnd > openMarker.index + 2) {
+            line = line.slice(0, wordEnd) + "**" + line.slice(wordEnd);
+          } else {
+            line = line.slice(0, openMarker.index) + line.slice(openMarker.index + 2);
+          }
+          modified = true;
+        }
+
+        if (!modified) break;
+      }
+
+      return line;
+    })
+    .join("\n");
+}
+
 export function fixCorruptedCasing(text: string): string {
   if (!text || typeof text !== "string") return text || "";
-  let trimmed = text.trim();
+  let trimmed = repairBrokenMarkdown(text.trim());
   if (!trimmed) return "";
 
   // 1. Remove weird prompt-leak suffixes attached to words, e.g., "critical2019" -> "2019" or clean word
@@ -320,38 +474,23 @@ export function fixCorruptedCasing(text: string): string {
   const cleanedWords = words.map(word => {
     if (/^\s+$/.test(word)) return word;
     
-    // Skip legitimate technical keywords / acronyms
-    if (/^(JavaScript|TypeScript|DevOps|GraphQL|PostgreSQL|MongoDB|LaTeX|iOS|macOS|PhD|BSc|MSc|MBA|BA|BS|MA|MS|PDF|HTML|CSS|API|UI|UX|AI|ML|AWS|GCP|CI\/CD|REST|SQL|Git|SaaS|Agile|Scrum|Kanban|React|Angular|Vue|Node\.js|Next\.js|Python|C\+\+|C\#|Java|PHP|Ruby|Swift|Kotlin|Go|Rust|Docker|Kubernetes)$/i.test(word.trim())) {
-      const lower = word.toLowerCase();
-      if (lower === "javascript") return "JavaScript";
-      if (lower === "typescript") return "TypeScript";
-      if (lower === "devops") return "DevOps";
-      if (lower === "graphql") return "GraphQL";
-      if (lower === "postgresql") return "PostgreSQL";
-      if (lower === "mongodb") return "MongoDB";
-      if (lower === "python") return "Python";
-      if (lower === "react") return "React";
-      if (lower === "html") return "HTML";
-      if (lower === "css") return "CSS";
-      if (lower === "sql") return "SQL";
-      if (lower === "aws") return "AWS";
-      if (lower === "gcp") return "GCP";
-      if (lower === "ai") return "AI";
-      if (lower === "ml") return "ML";
-      if (lower === "ui") return "UI";
-      if (lower === "ux") return "UX";
-      if (lower === "api") return "API";
+    // Skip legitimate technical keywords / acronyms (allowing surrounding markdown * or _)
+    const strippedWord = word.trim().replace(/^[*_]+|[*_.,;:!?)]+$/g, "");
+    if (/^(JavaScript|TypeScript|DevOps|GraphQL|PostgreSQL|MongoDB|LaTeX|iOS|macOS|PhD|BSc|MSc|MBA|BA|BS|MA|MS|PDF|HTML|CSS|API|APIs|UI|UX|UI\/UX|AI|ML|AWS|GCP|CI\/CD|REST|SQL|Git|GitHub|GitLab|SaaS|PaaS|IaaS|B2B|B2C|Agile|Scrum|Kanban|React|Angular|Vue|Node\.js|Next\.js|Python|C\+\+|C\#|Java|PHP|Ruby|Swift|Kotlin|Go|Rust|Docker|Kubernetes|PowerBI|HubSpot|WordPress|SharePoint|LinkedIn|YouTube|TikTok|PlayStation|Xbox|DirectX|OpenGL|WebGL|FastAPI|PyTorch|TensorFlow|DataBricks|SalesForce|OneDrive|UnrealEngine|GameMaker|Fishlabs|GmbH)$/i.test(strippedWord)) {
       return word;
     }
 
     const cleanWord = word.replace(/[^a-zA-Z]/g, "");
     
     // Check if word has corrupted internal capitalization (e.g. BachEloR, coMmunIcATiOn, UniVersITy, mIAnI, tEaM, mIdentify, AtTEntIon)
-    const hasCorruptedCaps = /[a-z][A-Z]/.test(word) || /[A-Z]{2,}[a-z]+[A-Z]/.test(word) || /^[a-z]+[A-Z]/.test(word);
+    const hasCorruptedCaps = /[a-z][A-Z]/.test(strippedWord) || /[A-Z]{2,}[a-z]+[A-Z]/.test(strippedWord) || /^[a-z]+[A-Z]/.test(strippedWord);
     
     if (hasCorruptedCaps && cleanWord.length > 2) {
-      const lower = word.toLowerCase();
-      return lower.charAt(0).toUpperCase() + lower.slice(1);
+      // Preserve any leading/trailing markdown or punctuation around the letters
+      return word.replace(/[a-zA-Z]+/, (alpha) => {
+        const lower = alpha.toLowerCase();
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      });
     }
     return word;
   });
@@ -493,7 +632,7 @@ export function normalizeCVData(
             let lines = deLooped.split(/(?:\r?\n|•|\u2022|\u2023|\u25E6|\u2043|\u2219|^\s*[-*]\s+)/g);
             lines.forEach((line) => {
               const cleaned = line
-                .replace(/^[\s•\-\*\u2022\u2023\u25E6\u2043\u2219]+/, "")
+                .replace(/^(?:[\s•\-\u2022\u2023\u25E6\u2043\u2219]+|\*(?!\*)\s+)+/, "")
                 .replace(/^\d+[\.\)]\s*/, "")
                 .trim();
               if (cleaned && cleaned.length > 3 && !isMetaText(cleaned)) {
@@ -536,8 +675,8 @@ export function normalizeCVData(
             if (!deLooped || isMetaText(deLooped)) return;
             let lines = deLooped.split(/(?:\r?\n|•|\u2022|\u2023|\u25E6|\u2043|\u2219|^\s*[-*]\s+)/g);
 
-            if (lines.length === 1 && lines[0].length > 180) {
-              const sentences = lines[0].split(/(?<=[.授業!?])\s+(?=[A-Z])/);
+            if (lines.length === 1 && lines[0].length > 220 && !lines[0].includes("**")) {
+              const sentences = lines[0].split(/(?<=[.!?])\s+(?=[A-Z])/);
               if (sentences.length > 1) {
                 lines = sentences;
               }
@@ -545,7 +684,7 @@ export function normalizeCVData(
 
             lines.forEach((line) => {
               const cleaned = line
-                .replace(/^[\s•\-\*\u2022\u2023\u25E6\u2043\u2219]+/, "")
+                .replace(/^(?:[\s•\-\u2022\u2023\u25E6\u2043\u2219]+|\*(?!\*)\s+)+/, "")
                 .replace(/^\d+[\.\)]\s*/, "")
                 .trim();
               if (cleaned && cleaned.length > 3 && !isMetaText(cleaned)) {
@@ -586,20 +725,23 @@ export function normalizeCVData(
       });
 
       if (targetExp) {
-        const skillRegex = new RegExp(`\\b${s.skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-        const boldedRegex = new RegExp(`\\*\\*[^\\*]*${s.skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\*]*\\*\\*`, 'i');
+        const escapedSkill = s.skill.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const skillRegex = new RegExp(`\\b${escapedSkill}\\b`, "i");
         
         let found = false;
         targetExp.highlights = targetExp.highlights.map((h) => {
-          if (boldedRegex.test(h)) {
-            found = true;
-            return h;
+          const match = skillRegex.exec(h);
+          if (!match) return h;
+          found = true;
+          const prefix = h.slice(0, match.index);
+          const doubleAsteriskCount = (prefix.match(/\*\*/g) || []).length;
+          // If doubleAsteriskCount is odd, the match is already inside a **...** bold span
+          if (doubleAsteriskCount % 2 === 1) {
+            return repairBrokenMarkdown(h);
           }
-          if (skillRegex.test(h)) {
-            found = true;
-            return h.replace(skillRegex, `**${s.skill}**`);
-          }
-          return h;
+          return repairBrokenMarkdown(
+            h.slice(0, match.index) + `**${match[0]}**` + h.slice(match.index + match[0].length)
+          );
         });
 
         if (!found) {
