@@ -389,35 +389,28 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
           }
 
           // 1. Company Name & Dates (Standard ATS Pattern)
-          const companyText = exp.company || exp.position || "Experience";
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(11);
-          doc.setTextColor(15, 23, 42);
-          doc.text(companyText, margin, y);
-          
-          // Right-aligned dates
           const dates = `${exp.startDate || ""} - ${exp.endDate || ""}`;
           doc.setFont("helvetica", "normal");
           doc.setFontSize(10);
           const datesWidth = doc.getTextWidth(dates);
           doc.text(dates, margin + contentWidth - datesWidth, y);
-          y += 5;
+
+          const companyText = exp.company || exp.position || "Experience";
+          const nextCompY = renderMarkdownText(companyText, margin, y, contentWidth - datesWidth - 5, "helvetica", 11, [15, 23, 42], "", "bold");
+          y = Math.max(nextCompY, y + 5);
 
           // 2. Job Title & Location
           const positionText = exp.company ? exp.position : "";
           if (positionText) {
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(10);
-            doc.setTextColor(51, 65, 85);
-            doc.text(positionText, margin, y);
-            
+            let locWidth = 0;
             if (exp.location) {
               doc.setFont("helvetica", "normal");
               doc.setFontSize(9.5);
-              const locWidth = doc.getTextWidth(exp.location);
+              locWidth = doc.getTextWidth(exp.location);
               doc.text(exp.location, margin + contentWidth - locWidth, y);
             }
-            y += 7;
+            const nextPosY = renderMarkdownText(positionText, margin, y, contentWidth - locWidth - 5, "helvetica", 10, [51, 65, 85], "", "bold");
+            y = Math.max(nextPosY, y + 6);
           } else {
             y += 2;
           }
@@ -452,26 +445,32 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       if (data.education && Array.isArray(data.education)) {
         data.education.forEach((edu) => {
           if (!edu) return;
-          checkPageBreak(20);
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(9);
-          doc.setTextColor(15, 23, 42);
-          const degreeLines = doc.splitTextToSize(edu.degree || "Degree", colWidth);
-          doc.text(degreeLines, margin, eduY);
-          eduY += (degreeLines.length * 4);
-
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.setTextColor(51, 65, 85);
-          const schoolLines = doc.splitTextToSize(edu.school || "School", colWidth);
-          doc.text(schoolLines, margin, eduY);
-          eduY += (schoolLines.length * 4);
-
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(8);
-          doc.setTextColor(148, 163, 184);
-          doc.text(edu.graduationDate || "", margin, eduY);
-          eduY += 8;
+          if (eduY + 20 > 280) {
+            doc.addPage();
+            eduY = margin;
+          }
+          if (edu.degree) {
+            eduY = renderMarkdownText(edu.degree, margin, eduY, colWidth, "helvetica", 9, [15, 23, 42], "", "bold");
+            eduY += 0.5;
+          }
+          if (edu.school) {
+            eduY = renderMarkdownText(edu.school, margin, eduY, colWidth, "helvetica", 9, [51, 65, 85], "", "normal");
+            eduY += 0.5;
+          }
+          const eduMeta = [edu.graduationDate, edu.location].filter(Boolean).join(" • ");
+          if (eduMeta) {
+            eduY = renderMarkdownText(eduMeta, margin, eduY, colWidth, "helvetica", 8, [148, 163, 184], "", "normal");
+            eduY += 1;
+          }
+          if (Array.isArray((edu as any).highlights)) {
+            (edu as any).highlights.forEach((h: string) => {
+              if (h) {
+                eduY = renderMarkdownText(h, margin + 4, eduY, colWidth - 4, "helvetica", 8, [71, 85, 105], "•");
+                eduY += 1;
+              }
+            });
+          }
+          eduY += 4;
         });
       }
 
@@ -491,7 +490,8 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       if (data.skills && Array.isArray(data.skills)) {
         data.skills.forEach((skill) => {
           if (!skill) return;
-          const textWidth = doc.getTextWidth(skill);
+          const cleanSkill = stripMarkdown(skill);
+          const textWidth = doc.getTextWidth(cleanSkill);
           const pillPadding = 2;
           const pillWidth = textWidth + (pillPadding * 2);
           const pillHeight = 6;
@@ -508,7 +508,7 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
           
           // Draw Skill Text
           doc.setTextColor(51, 65, 85);
-          doc.text(skill, currentX + pillPadding, skillY);
+          doc.text(cleanSkill, currentX + pillPadding, skillY);
           
           currentX += pillWidth + 2;
         });
@@ -620,34 +620,28 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
           }
 
           // 1. Company & Dates
-          const companyText = exp.company || exp.position || "Experience";
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(12);
-          doc.setTextColor(15, 23, 42);
-          doc.text(companyText, margin, y);
-          
           const dates = `${exp.startDate || ""} - ${exp.endDate || ""}`;
           doc.setFont("helvetica", "normal");
           doc.setFontSize(11);
           const datesWidth = doc.getTextWidth(dates);
           doc.text(dates, margin + contentWidth - datesWidth, y);
-          y += 6;
+
+          const companyText = exp.company || exp.position || "Experience";
+          const nextCompY = renderMarkdownText(companyText, margin, y, contentWidth - datesWidth - 5, "helvetica", 12, [15, 23, 42], "", "bold");
+          y = Math.max(nextCompY, y + 6);
 
           // 2. Position & Location
           const positionText = exp.company ? exp.position : "";
           if (positionText) {
-            doc.setFont("helvetica", "bold");
-            doc.setFontSize(11);
-            doc.setTextColor(71, 85, 105);
-            doc.text(positionText.toUpperCase(), margin, y);
-            
+            let locWidth = 0;
             if (exp.location) {
               doc.setFont("helvetica", "normal");
               doc.setFontSize(10);
-              const locWidth = doc.getTextWidth(exp.location);
+              locWidth = doc.getTextWidth(exp.location);
               doc.text(exp.location, margin + contentWidth - locWidth, y);
             }
-            y += 8;
+            const nextPosY = renderMarkdownText(positionText.toUpperCase(), margin, y, contentWidth - locWidth - 5, "helvetica", 11, [71, 85, 105], "", "bold");
+            y = Math.max(nextPosY, y + 7);
           }
 
           if (exp.highlights && Array.isArray(exp.highlights)) {
@@ -679,19 +673,32 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       if (data.education && Array.isArray(data.education)) {
         data.education.forEach((edu) => {
           if (!edu) return;
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(10);
-          doc.text(edu.school || "School", margin, eduY);
-          eduY += 4;
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(9);
-          doc.setTextColor(100, 116, 139);
-          doc.text(edu.degree || "Degree", margin, eduY);
-          eduY += 4;
-          doc.setFont("helvetica", "italic");
-          doc.setFontSize(8);
-          doc.text(edu.graduationDate || "", margin, eduY);
-          eduY += 10;
+          if (eduY + 20 > 280) {
+            doc.addPage();
+            eduY = margin;
+          }
+          if (edu.school) {
+            eduY = renderMarkdownText(edu.school, margin, eduY, colWidth - 5, "helvetica", 10, [15, 23, 42], "", "bold");
+            eduY += 0.5;
+          }
+          if (edu.degree) {
+            eduY = renderMarkdownText(edu.degree, margin, eduY, colWidth - 5, "helvetica", 9, [100, 116, 139], "", "normal");
+            eduY += 0.5;
+          }
+          const eduMeta = [edu.graduationDate, edu.location].filter(Boolean).join(" • ");
+          if (eduMeta) {
+            eduY = renderMarkdownText(eduMeta, margin, eduY, colWidth - 5, "helvetica", 8, [148, 163, 184], "", "italic");
+            eduY += 1;
+          }
+          if (Array.isArray((edu as any).highlights)) {
+            (edu as any).highlights.forEach((h: string) => {
+              if (h) {
+                eduY = renderMarkdownText(h, margin + 4, eduY, colWidth - 9, "helvetica", 8.5, [71, 85, 105], "•");
+                eduY += 1;
+              }
+            });
+          }
+          eduY += 5;
         });
       }
 
@@ -711,7 +718,8 @@ export const exportToSelectablePDF = (data: CVData, filename: string, template: 
       if (data.skills && Array.isArray(data.skills)) {
         data.skills.forEach((skill) => {
           if (skill) {
-            doc.text(skill, margin + colWidth + 5, skillY);
+            const cleanSkill = stripMarkdown(skill);
+            doc.text(cleanSkill, margin + colWidth + 5, skillY);
             skillY += 5;
           }
         });
